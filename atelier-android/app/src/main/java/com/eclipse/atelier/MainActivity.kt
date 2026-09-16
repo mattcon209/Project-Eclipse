@@ -161,6 +161,19 @@ fun AtelierApp(initialToken: String, saveToken: (String) -> Unit) {
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("ADD TO LIBRARY", letterSpacing = 2.sp) }
+            Button(
+                onClick = {
+                    err = ""
+                    scope.launch {
+                        runCatching { searchPc(host, token) }
+                            .onSuccess { status = it }
+                            .onFailure { err = it.message ?: "Search failed" }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Surface, contentColor = Paper),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("SEARCH THIS PC", letterSpacing = 2.sp) }
         }
         if (err.isNotBlank()) Text(err, color = Copper, fontSize = 13.sp)
         Text("Lab UI (same protocol) is served by the engine at /", color = Mute, fontSize = 12.sp)

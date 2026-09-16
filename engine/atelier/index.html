@@ -93,11 +93,14 @@
 
       <div id="screen-library" class="screen">
         <p class="kicker">Library</p>
-        <p class="lede">Paste a Hugging Face, GitHub, or Civitai link. The PC installs it. <button class="q" id="q-paste" type="button" aria-label="How does paste-install work?">?</button></p>
+        <p class="lede">Paste a link to download, or search the PC for models already on disk. <button class="q" id="q-paste" type="button" aria-label="How does paste-install work?">?</button></p>
         <div class="prompt">
           <textarea id="lib-url" rows="2" placeholder="https://huggingface.co/…"></textarea>
           <div class="prompt-row">
-            <span class="meta" id="lib-hint">size-gated · no content filter</span>
+            <span class="meta">
+              <button class="ghost" id="lib-search" type="button">Search this PC</button>
+              <button class="q" id="q-search" type="button" aria-label="What does Search this PC do?">?</button>
+            </span>
             <button class="make" id="lib-add" type="button">Add</button>
           </div>
         </div>

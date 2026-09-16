@@ -15,6 +15,10 @@ const helpCopy = {
     title: "Paste a link",
     body: "One paste of a Hugging Face, GitHub, or Civitai link is a complete install. The PC probes size, refuses if the disk can’t take it, downloads, and figures out what the files are. Unknown things land in Inbox — never silent Ready.",
   },
+  search: {
+    title: "Search this PC",
+    body: "Looks on MattsGamingPC for models already installed — Hugging Face cache, Ollama, LM Studio, Downloads, common model folders. Nothing is copied. Ready cards point at the files where they sit. The phone never holds the weights.",
+  },
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -210,6 +214,10 @@ $("#q-seed").addEventListener("click", (e) => {
 $("#q-paste").addEventListener("click", (e) => {
   e.stopPropagation();
   openHelp("paste");
+});
+$("#q-search").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openHelp("search");
 });
 $("#help-ok").addEventListener("click", () => $("#help").classList.remove("on"));
 $("#help-hide").addEventListener("click", () => {

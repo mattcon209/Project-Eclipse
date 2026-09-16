@@ -134,6 +134,8 @@ body { min-height: 100dvh; }
   color: var(--text); font: 13.5px/1.4 ui-sans-serif, system-ui, sans-serif; min-height: 44px;
 }
 .prompt-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prompt-row .meta { display: inline-flex; align-items: center; gap: 6px; }
+.prompt-row .ghost { padding: 8px 10px; }
 .meta { font-family: ui-monospace, monospace; font-size: 10px; color: var(--faint); }
 .q {
   display: inline-flex; align-items: center; justify-content: center;

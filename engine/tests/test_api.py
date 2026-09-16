@@ -45,7 +45,7 @@ def test_box18_atelier_ui_served():
     assert r.status_code == 200
     assert "Atelier" in r.text
     assert "Library" in r.text
-    assert "Paste a Hugging Face" in r.text
+    assert "Search this PC" in r.text
 
 
 def test_box19_make_requires_pair():

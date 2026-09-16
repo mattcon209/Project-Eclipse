@@ -331,64 +331,12 @@ def _apply_detect(rec: dict[str, Any], target: Path, lib: Library) -> dict[str, 
 
 
 def scan_folder(path: str | Path, lib: Library | None = None) -> list[dict[str, Any]]:
-    lib = lib or LIB
-    root = Path(path).expanduser().resolve()
-    if not root.exists():
-        raise AcquireError("That folder isn’t on this PC.")
-    added: list[dict[str, Any]] = []
-    candidates: list[Path] = []
-    if root.is_file():
-        candidates = [root]
-    else:
-        if (root / "model_index.json").exists() or any(root.glob("*.gguf")):
-            candidates = [root]
-        else:
-            for child in sorted(root.iterdir()):
-                if child.name.startswith(".") and child.name not in {".cache"}:
-                    continue
-                if child.is_dir():
-                    if (child / "model_index.json").exists() or list(child.glob("*.gguf")) or list(child.glob("*.safetensors")):
-                        candidates.append(child)
-                    else:
-                        for sub in child.iterdir() if child.is_dir() else []:
-                            if sub.is_dir() and (
-                                (sub / "model_index.json").exists()
-                                or list(sub.glob("*.gguf"))
-                                or list(sub.glob("config.json"))
-                            ):
-                                candidates.append(sub)
-                elif child.suffix.lower() in {".gguf", ".ggml", ".safetensors"}:
-                    candidates.append(child)
-    for cand in candidates:
-        existing = lib.by_path(str(cand.resolve()))
-        if existing:
-            added.append(existing)
-            continue
-        info = sniff(cand)
-        size = cand.stat().st_size if cand.is_file() else sum(f.stat().st_size for f in cand.rglob("*") if f.is_file())
-        rec = lib.add(
-            {
-                "name": info["name"],
-                "source": str(cand),
-                "source_kind": "folder",
-                "path": str(cand.resolve()),
-                "bytes": size,
-                "managed": False,
-                "state": "ready" if info["known"] else "inbox",
-                "format": info["format"],
-                "modality": info["modality"],
-                "handler": info["handler"],
-                "notes": info["notes"],
-                "job_id": None,
-                "error": None,
-                "quant": None,
-                "vram_balanced_mb": guess_vram_mb(info["modality"], size) if info["known"] else None,
-            }
-        )
-        if rec["state"] == "ready":
-            register_card(rec)
-        added.append(rec)
-    return added
+    from eclipse.scan import scan_folder as _scan
+
+    try:
+        return _scan(path, lib=lib)
+    except FileNotFoundError as e:
+        raise AcquireError(str(e) or "That folder isn’t on this PC.") from e
 
 
 def run(

@@ -325,3 +325,58 @@ def test_box50_library_api_requires_pair():
 
 def test_box51_guess_vram_lora_is_zero():
     assert guess_vram_mb("lora", 50_000_000) == 0
+
+
+def test_box52_search_finds_nested_gguf_and_does_not_copy(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    nested = home / ".cache" / "huggingface" / "hub" / "models--org--gore-llm" / "snapshots" / "abc"
+    nested.mkdir(parents=True)
+    _gguf(nested / "gore-horror-Q4_K_M.gguf")
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    assert out["ok"] is True
+    assert out["added"] >= 1
+    rec = next(r for r in out["items"] if r.get("state") == "ready")
+    assert rec["managed"] is False
+    assert rec["modality"] == "text"
+    assert "gore" in rec["name"].lower() or "gore" in rec["source"].lower()
+    assert Path(rec["path"]).exists()
+    # still on disk in the cache, not copied into library/items
+    assert "library/items" not in rec["path"].replace("\\", "/")
+
+
+def test_box53_search_dedupes_second_run(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    d = home / "Downloads"
+    d.mkdir(parents=True)
+    _gguf(d / "local.gguf")
+    lib = _lib(tmp_path)
+    a = scan_machine(lib=lib, home=home)
+    b = scan_machine(lib=lib, home=home)
+    assert a["added"] >= 1
+    assert b["added"] == 0
+    assert b["already"] >= 1
+
+
+def test_box54_search_api_requires_pair():
+    from fastapi.testclient import TestClient
+    from eclipse.gateway import app
+
+    c = TestClient(app)
+    r = c.post("/api/library/search", json={})
+    assert r.status_code in (401, 409)
+    assert r.status_code not in (403, 451)
+
+
+def test_box55_atelier_has_search_button():
+    from fastapi.testclient import TestClient
+    from eclipse.gateway import app
+
+    c = TestClient(app)
+    r = c.get("/")
+    assert r.status_code == 200
+    assert "Search this PC" in r.text

@@ -20,6 +20,7 @@ from eclipse.jobs import list_jobs
 from eclipse.acquire import AcquireError
 from eclipse.acquire import run as acquire_run
 from eclipse.acquire import scan_folder
+from eclipse.scan import scan_machine
 from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.orchestrator import make_image, session, set_ladder, set_mode, use_model
@@ -67,6 +68,10 @@ class AcquireIn(BaseModel):
 
 class ScanIn(BaseModel):
     path: str = Field(default="", max_length=2000)
+
+
+class SearchIn(BaseModel):
+    extra: str = Field(default="", max_length=2000)
 
 
 def _auth(authorization: str | None) -> None:
@@ -237,6 +242,13 @@ def library_scan(body: ScanIn, authorization: str | None = Header(default=None))
     except AcquireError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True, "items": items}
+
+
+@app.post("/api/library/search")
+def library_search(body: SearchIn | None = None, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    extra = (body.extra if body else "") or ""
+    return scan_machine(extra=extra.strip() or None)
 
 
 @app.get("/api/library/{item_id}")
