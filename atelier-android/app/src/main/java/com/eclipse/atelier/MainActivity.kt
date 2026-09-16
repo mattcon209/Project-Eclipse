@@ -73,6 +73,7 @@ fun AtelierApp(initialToken: String, saveToken: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Not paired.") }
     var err by remember { mutableStateOf("") }
+    var paste by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -83,7 +84,7 @@ fun AtelierApp(initialToken: String, saveToken: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("ATELIER", color = Tungsten, fontSize = 13.sp, letterSpacing = 4.sp, fontFamily = FontFamily.Serif)
-        Text("Phase 0 shell. Pair to the engine on the LAN.", color = Mute, fontSize = 14.sp)
+        Text("Phase 1 shell. Pair, then paste a model link.", color = Mute, fontSize = 14.sp)
         OutlinedTextField(
             value = host,
             onValueChange = { host = it },
@@ -139,6 +140,28 @@ fun AtelierApp(initialToken: String, saveToken: (String) -> Unit) {
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) { Text("PING ENGINE", letterSpacing = 2.sp) }
+        if (token.isNotBlank()) {
+            OutlinedTextField(
+                value = paste,
+                onValueChange = { paste = it },
+                label = { Text("Paste model link") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = fieldColors(),
+            )
+            Button(
+                onClick = {
+                    err = ""
+                    scope.launch {
+                        runCatching { acquire(host, token, paste) }
+                            .onSuccess { status = it }
+                            .onFailure { err = it.message ?: "Acquire failed" }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Copper, contentColor = Color(0xFF1A0C08)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("ADD TO LIBRARY", letterSpacing = 2.sp) }
+        }
         if (err.isNotBlank()) Text(err, color = Copper, fontSize = 13.sp)
         Text("Lab UI (same protocol) is served by the engine at /", color = Mute, fontSize = 12.sp)
     }
@@ -167,6 +190,25 @@ private suspend fun pair(host: String, code: String): String = withContext(Dispa
         val json = JSONObject(res.body?.string() ?: "{}")
         if (!res.isSuccessful) error(json.optString("error", "Pair failed"))
         json.getString("token")
+    }
+}
+
+private suspend fun acquire(host: String, token: String, url: String): String = withContext(Dispatchers.IO) {
+    val longHttp = http.newBuilder().readTimeout(120, TimeUnit.SECONDS).build()
+    val body = JSONObject().put("url", url).put("confirm", true).toString()
+    val req = Request.Builder()
+        .url(host.trimEnd('/') + "/api/library/acquire")
+        .header("Authorization", "Bearer $token")
+        .post(body.toRequestBody("application/json".toMediaType()))
+        .build()
+    longHttp.newCall(req).execute().use { res ->
+        val json = JSONObject(res.body?.string() ?: "{}")
+        if (res.code == 409) error(json.optString("reason", "Won’t fit"))
+        if (!res.isSuccessful) error(json.optString("detail", json.optString("error", "Acquire failed")))
+        val rec = json.optJSONObject("record")
+        val state = rec?.optString("state") ?: "ok"
+        val name = rec?.optString("name") ?: url
+        "$state · $name"
     }
 }
 

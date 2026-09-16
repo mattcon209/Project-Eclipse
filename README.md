@@ -2,9 +2,9 @@
 
 Local-first AI studio. **Atelier** (Galaxy S24+ APK) talks to a headless engine on **MattsGamingPC**. Spec: `docs/`.
 
-## Phase 0 (now)
+## Phase 1 (now)
 
-Engine + pairing + live resources + jobs + Atelier shell. Image **Make** is honest: it will not fake a picture until a model is installed.
+Library + paste-link acquire (HF / GitHub / Civitai / folder) + detect + size-gate. Image **Make** is still honest: no fake picture until an image handler exists (Phase 3).
 
 ```bash
 cd engine
@@ -21,7 +21,7 @@ Android product shell: `atelier-android/` (build in Android Studio on the PC).
 | Path | What |
 |---|---|
 | `engine/` | Python FastAPI engine (`0.0.0.0:7740`) |
-| `engine/atelier/` | Phase 0 Atelier UI served by the engine |
+| `engine/atelier/` | Atelier lab UI served by the engine |
 | `atelier-android/` | Kotlin Compose APK source |
 | `ui_mockup/` | Signed-off visual direction |
 | `docs/` | Spec v1.6 + logistics manual |

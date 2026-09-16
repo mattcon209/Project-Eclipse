@@ -17,7 +17,12 @@ from eclipse.calibrator import run as cal_run
 from eclipse.jobs import cancel as job_cancel
 from eclipse.jobs import get as job_get
 from eclipse.jobs import list_jobs
-from eclipse.orchestrator import make_image, session, set_ladder, set_mode
+from eclipse.acquire import AcquireError
+from eclipse.acquire import run as acquire_run
+from eclipse.acquire import scan_folder
+from eclipse.library import get_item, list_items, summary as library_summary
+from eclipse.library import LIB
+from eclipse.orchestrator import make_image, session, set_ladder, set_mode, use_model
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -55,6 +60,15 @@ class MakeIn(BaseModel):
     prompt: str = Field(default="", max_length=4000)
 
 
+class AcquireIn(BaseModel):
+    url: str = Field(default="", max_length=2000)
+    confirm: bool = False
+
+
+class ScanIn(BaseModel):
+    path: str = Field(default="", max_length=2000)
+
+
 def _auth(authorization: str | None) -> None:
     token = None
     if authorization and authorization.lower().startswith("bearer "):
@@ -75,7 +89,7 @@ def public_status() -> dict[str, Any]:
     return {
         "ok": True,
         "version": __version__,
-        "phase": 0,
+        "phase": 1,
         "engine": "running",
         "paired": is_paired(),
         "pairing": pair_status(),
@@ -84,6 +98,7 @@ def public_status() -> dict[str, Any]:
         "watchdog": wd_snapshot(),
         "calibrated": bool(cal_get().get("at")),
         "jobs": len(list_jobs()),
+        "library": library_summary(),
         "vram_chip": vram,
         "now": time.time(),
     }
@@ -103,7 +118,7 @@ def _startup() -> None:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "phase": 0}
+    return {"ok": True, "version": __version__, "phase": 1}
 
 
 @app.get("/api/status")
@@ -169,7 +184,7 @@ def cancel(job_id: str, authorization: str | None = Header(default=None)) -> dic
 @app.post("/api/mode")
 def mode(body: ModeIn, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
-    allowed = {"home", "image", "chat", "audio", "edit", "video", "talk", "train"}
+    allowed = {"home", "image", "chat", "audio", "edit", "video", "talk", "train", "jobs", "library", "gallery"}
     if body.mode not in allowed:
         raise HTTPException(400, "Unknown mode.")
     return set_mode(body.mode)
@@ -194,6 +209,61 @@ def make(body: MakeIn, authorization: str | None = Header(default=None)) -> dict
 def kpis(authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     return OS.kpis()
+
+
+@app.get("/api/library")
+def library_list(authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return {"items": list_items(), **library_summary()}
+
+
+@app.post("/api/library/acquire")
+def library_acquire(body: AcquireIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    try:
+        result = acquire_run(body.url.strip(), confirm=body.confirm)
+    except AcquireError as e:
+        raise HTTPException(400, str(e)) from e
+    if result.get("refused"):
+        return JSONResponse(result, status_code=409)
+    return result
+
+
+@app.post("/api/library/scan")
+def library_scan(body: ScanIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    try:
+        items = scan_folder(body.path.strip())
+    except AcquireError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "items": items}
+
+
+@app.get("/api/library/{item_id}")
+def library_one(item_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    rec = get_item(item_id)
+    if not rec:
+        raise HTTPException(404, "No such library item.")
+    return rec
+
+
+@app.post("/api/library/{item_id}/use")
+def library_use(item_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    try:
+        return use_model(item_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.delete("/api/library/{item_id}")
+def library_delete(item_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    rec = LIB.remove(item_id)
+    if not rec:
+        raise HTTPException(404, "No such library item.")
+    return {"ok": True, "id": item_id}
 
 
 @app.websocket("/api/ws")

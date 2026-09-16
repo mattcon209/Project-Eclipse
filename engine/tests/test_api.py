@@ -27,7 +27,7 @@ def test_box16_health():
     r = c.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
-    assert r.json()["phase"] == 0
+    assert r.json()["phase"] == 1
 
 
 def test_box17_status_unpaired_has_code():
@@ -44,6 +44,8 @@ def test_box18_atelier_ui_served():
     r = c.get("/")
     assert r.status_code == 200
     assert "Atelier" in r.text
+    assert "Library" in r.text
+    assert "Paste a Hugging Face" in r.text
 
 
 def test_box19_make_requires_pair():

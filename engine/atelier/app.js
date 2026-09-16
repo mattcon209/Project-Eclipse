@@ -11,6 +11,10 @@ const helpCopy = {
     title: "Seed",
     body: "A seed is the roll of the dice. Same prompt + same seed = the same picture. Seed lock holds it so you can change one word and keep the hallway.",
   },
+  paste: {
+    title: "Paste a link",
+    body: "One paste of a Hugging Face, GitHub, or Civitai link is a complete install. The PC probes size, refuses if the disk can’t take it, downloads, and figures out what the files are. Unknown things land in Inbox — never silent Ready.",
+  },
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -69,18 +73,18 @@ function applyStatus(s) {
     : `Engine live on ${s.resources?.hostname || "this box"} · GPU not visible here (will be on MattsGamingPC)`;
   $("#resume-line").textContent = mode ? mode + " still selected" : "tap Image to enter a mode";
   $("#jobs-count").textContent = (s.jobs || 0) + " jobs";
-  $("#host-name").textContent = s.resources?.hostname || "—";
-  $("#gpu-line").textContent = gpu.available ? gpu.name : "no nvidia-smi in this lab";
+  const ready = s.library?.ready;
+  if ($("#lib-count")) $("#lib-count").textContent = (ready != null ? ready : 0) + " ready";
+  const hostEl = $("#host-name");
+  if (hostEl) hostEl.textContent = s.resources?.hostname || "—";
+  const gpuEl = $("#gpu-line");
+  if (gpuEl) gpuEl.textContent = gpu.available ? gpu.name : "no nvidia-smi in this lab";
   $("#disk-line").textContent = disk.free_gb != null ? disk.free_gb + " GB free" : "—";
   $("#ram-line").textContent = ram.total_mb ? Math.round(ram.used_mb / 1024 * 10) / 10 + " / " + Math.round(ram.total_mb / 1024 * 10) / 10 + " GB" : "RAM —";
   const lad = s.session?.ladder || "balanced";
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
-  $("#filmstock").textContent = `— · — · seed ${s.session?.seed ?? "—"} · ${lad}`;
-  $("#res-json").textContent = JSON.stringify(
-    { gpu, ram, disk, cpu: s.resources?.cpu, calibrated: s.calibrated, watchdog: s.watchdog },
-    null,
-    2
-  );
+  const loaded = s.session?.loaded_name || "—";
+  $("#filmstock").textContent = `${loaded} · — · seed ${s.session?.seed ?? "—"} · ${lad}`;
 }
 
 async function boot() {
@@ -121,6 +125,7 @@ $("#pair-btn").addEventListener("click", async () => {
     applyStatus(await api("/api/status"));
     connectWs();
     refreshJobs();
+    refreshLibrary();
   } catch (e) {
     $("#pair-err").textContent = e.message || "Pair failed.";
   }
@@ -128,13 +133,16 @@ $("#pair-btn").addEventListener("click", async () => {
 
 function go(m) {
   document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
-  ["home", "image", "jobs", "more"].forEach((id) => {
-    $("#screen-" + id).classList.toggle("on", id === m);
+  ["home", "image", "library", "jobs"].forEach((id) => {
+    const el = $("#screen-" + id);
+    if (el) el.classList.toggle("on", id === m);
   });
-  if (m === "image" || m === "home" || m === "jobs") {
-    api("/api/mode", { method: "POST", body: JSON.stringify({ mode: m === "jobs" || m === "more" ? "home" : m }) }).catch(() => {});
+  const gen = new Set(["image", "chat", "audio", "edit", "video", "talk", "train"]);
+  if (gen.has(m)) {
+    api("/api/mode", { method: "POST", body: JSON.stringify({ mode: m }) }).catch(() => {});
   }
   if (m === "jobs") refreshJobs();
+  if (m === "library") refreshLibrary();
 }
 
 document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", () => go(b.dataset.m)));
@@ -199,11 +207,65 @@ $("#q-seed").addEventListener("click", (e) => {
   e.stopPropagation();
   openHelp("seed");
 });
+$("#q-paste").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openHelp("paste");
+});
 $("#help-ok").addEventListener("click", () => $("#help").classList.remove("on"));
 $("#help-hide").addEventListener("click", () => {
   hiddenHelp[$("#help").dataset.key] = true;
   localStorage.setItem(HELP_KEY, JSON.stringify(hiddenHelp));
   $("#help").classList.remove("on");
+});
+
+async function refreshLibrary() {
+  try {
+    const r = await api("/api/library");
+    renderLibrary(r.items || []);
+  } catch (_) {}
+}
+
+function renderLibrary(items) {
+  const el = $("#lib-list");
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = '<p class="faint">Empty. Paste a link — Ready cards land here. Unknown files go to Inbox, never silent Ready.</p>';
+    return;
+  }
+  el.innerHTML = items
+    .map((it) => {
+      const st = (it.state || "—").toUpperCase();
+      const mod = (it.modality || "unknown").toUpperCase();
+      const gb = it.bytes != null ? (it.bytes / 1024 ** 3).toFixed(2) + " GB" : "size ?";
+      const action = it.state === "ready" ? `<button class="ghost use" data-id="${it.id}" type="button">Use</button>` : "";
+      return `<article class="job"><div class="st">${st} · ${mod}</div><h3>${escapeHtml(it.name || "untitled")}</h3><p>${escapeHtml(gb)} · ${escapeHtml(it.notes || it.format || "")}</p>${action}</article>`;
+    })
+    .join("");
+  el.querySelectorAll(".use").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const used = await api("/api/library/" + b.dataset.id + "/use", { method: "POST", body: "{}" });
+      applyStatus(await api("/api/status"));
+      const mod = used.record?.modality;
+      if (mod === "image" || mod === "video") go("image");
+    });
+  });
+}
+
+$("#lib-add").addEventListener("click", async () => {
+  $("#lib-err").textContent = "";
+  const url = $("#lib-url").value.trim();
+  try {
+    const r = await api("/api/library/acquire", { method: "POST", body: JSON.stringify({ url }) });
+    if (r.needs_confirm) {
+      const ok = window.confirm(r.reason || "Large download. Confirm?");
+      if (!ok) return;
+      await api("/api/library/acquire", { method: "POST", body: JSON.stringify({ url, confirm: true }) });
+    }
+    await refreshLibrary();
+  } catch (e) {
+    const d = e.data || {};
+    $("#lib-err").textContent = d.reason || e.message || "Install failed.";
+  }
 });
 
 function connectWs() {

@@ -26,3 +26,4 @@ python -m pytest tests -v
 | 16–20 | HTTP API: health, status, UI, auth, no content 403 | `test_api.py` |
 | 21 | Make is honest and unfiltered | `test_box21_*` |
 | 22 | KPI endpoint is paired | `test_box22_*` |
+| 30–51 | Library, detect, allowlist, size-gate, paste→Ready, scan, Use | `test_library.py` |
