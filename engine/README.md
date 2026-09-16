@@ -8,7 +8,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Binds `0.0.0.0:7740`. Open `http://<pc>:7740` for the Atelier shell (lab). Library → paste a link → Ready card. The Android app in `atelier-android/` is the product UI.
+Binds `0.0.0.0:7740`. Open `http://<pc>:7740` for the Atelier shell (lab). Library → **Search this PC** (HF cache, Ollama, LM Studio, Downloads — files stay on disk) or paste a link. The Android app in `atelier-android/` is the product UI.
 
 Pairing: the engine prints a 6-digit code. The phone (or lab UI) sends it once and stores a token.
 
