@@ -18,6 +18,7 @@ from eclipse.jobs import cancel as job_cancel
 from eclipse.jobs import get as job_get
 from eclipse.jobs import list_jobs
 from eclipse.orchestrator import make_image, session, set_ladder, set_mode
+from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
 from eclipse.watchdog import snapshot as wd_snapshot
@@ -187,6 +188,12 @@ def ladder(body: LadderIn, authorization: str | None = Header(default=None)) -> 
 def make(body: MakeIn, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     return make_image(body.prompt.strip())
+
+
+@app.get("/api/kpis")
+def kpis(authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return OS.kpis()
 
 
 @app.websocket("/api/ws")

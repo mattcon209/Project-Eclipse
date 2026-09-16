@@ -5,6 +5,8 @@ from typing import Any
 
 from eclipse.config import DATA_DIR, PROJECT_DEFAULT
 from eclipse.jobs import append_log, create as create_job
+from eclipse.pass_through import unchanged
+from eclipse.resource_os import OS
 from eclipse.store import JsonStore
 
 _state = JsonStore(
@@ -22,7 +24,9 @@ _state = JsonStore(
 
 
 def session() -> dict[str, Any]:
-    return _state.read()
+    data = _state.read()
+    data["kpis"] = OS.kpis()
+    return data
 
 
 def set_mode(mode: str) -> dict[str, Any]:
@@ -30,13 +34,11 @@ def set_mode(mode: str) -> dict[str, Any]:
     prev = data.get("mode")
     data["mode"] = mode
     data["mode_entered"] = time.time()
-    # Mode-sticky: do not unload on re-entry of same mode.
-    if prev != mode:
-        data["loaded"] = data.get("loaded") if prev == mode else data.get("loaded")
-        if prev and prev != mode:
-            data["loaded"] = None  # swap: previous heavy pipeline gone (none installed yet)
+    if prev and prev != mode:
+        data["loaded"] = None
+    OS.enter_mode(mode, data.get("loaded"))
     _state.write(data)
-    return data
+    return session()
 
 
 def set_ladder(ladder: str) -> dict[str, Any]:
@@ -46,25 +48,35 @@ def set_ladder(ladder: str) -> dict[str, Any]:
     data = _state.read()
     data["ladder"] = ladder
     _state.write(data)
-    return data
+    return session()
 
 
 def make_image(prompt: str) -> dict[str, Any]:
-    """Phase 0: honest job. No fake picture."""
+    prompt = unchanged(prompt)
     data = session()
     if data.get("mode") != "image":
         set_mode("image")
+        data = session()
     job = create_job(
         "image",
         (prompt or "untitled")[:80],
         {"prompt": prompt, "ladder": data.get("ladder"), "seed": data.get("seed")},
     )
-    append_log(job["id"], "Image mode is warm. No image model is installed yet.", state="blocked", progress=0)
-    append_log(
-        job["id"],
-        "Paste a Hugging Face or GitHub link in Library when Phase 1 acquire ships. Nothing was faked.",
-        state="blocked",
-    )
+    result = OS.run(prompt, ladder=data.get("ladder") or "balanced", job_id=job["id"])
+    if result.refused:
+        append_log(job["id"], result.refuse_reason or "Refused.", state="blocked", progress=0)
+        if "model" in (result.refuse_reason or "").lower():
+            append_log(
+                job["id"],
+                "Paste a Hugging Face or GitHub link in Library when Phase 1 acquire ships. Nothing was faked.",
+                state="blocked",
+            )
+        return get_job_safe(job["id"])
+    if result.queued:
+        append_log(job["id"], "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return get_job_safe(job["id"])
+    append_log(job["id"], "first_byte", state="running", progress=1)
+    append_log(job["id"], "No image handler in Phase 0 — blocked after first-byte contract.", state="blocked")
     return get_job_safe(job["id"])
 
 

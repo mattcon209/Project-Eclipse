@@ -27,4 +27,8 @@ Android product shell: `atelier-android/` (build in Android Studio on the PC).
 | `docs/` | Spec v1.6 + logistics manual |
 | `docgen/` | Regenerates the Word docs |
 
-No content filters. Mode-sticky residency is in the orchestrator (swap on mode change only).
+No content filters. Mode-sticky residency is Resource OS (swap on mode or model change only). Long disconnect (~12 min) is the only idle unload.
+
+```
+cd engine && python -m pytest tests -v
+```

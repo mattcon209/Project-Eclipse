@@ -13,3 +13,9 @@ Binds `0.0.0.0:7740`. Open `http://<pc>:7740` for the Phase 0 Atelier shell (lab
 Pairing: the engine prints a 6-digit code. The phone (or lab UI) sends it once and stores a token.
 
 No content filters. GPU readout uses `nvidia-smi` (present on MattsGamingPC; absent in some lab boxes).
+
+Optimization boxes (Resource OS, mode-sticky residency, refuse-early, pass-through):
+
+```
+python -m pytest tests -v
+```
