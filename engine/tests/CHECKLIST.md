@@ -29,3 +29,4 @@ python -m pytest tests -v
 | 30–51 | Library, detect, allowlist, size-gate, paste→Ready, scan, Use | `test_library.py` |
 | 52–56 | Search this PC + Ollama blobs | `test_box52_*`–`test_box56_*` |
 | 57 | Every static button is wired; favicon; Android searchPc | `test_ui_wiring.py` |
+| 60–69 | Phase 2 chats: persist, pass-through, warm turns, search, persona, API | `test_chat.py` |

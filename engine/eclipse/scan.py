@@ -251,6 +251,7 @@ def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = N
                 size = 0
         else:
             size = sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
+        ollama_name = names.get(str(resolved))
         rec = lib.add(
             {
                 "name": display,
@@ -268,6 +269,8 @@ def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = N
                 "error": None,
                 "quant": None,
                 "vram_balanced_mb": guess_vram_mb(info["modality"], size) if info["known"] else None,
+                "runtime": "ollama" if ollama_name else None,
+                "ollama_name": ollama_name,
             }
         )
         if rec["state"] == "ready":

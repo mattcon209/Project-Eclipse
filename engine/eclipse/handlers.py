@@ -1,7 +1,7 @@
 """Handler SDK — stable adapter surface.
 
 New model families plug in here. The APK never learns Python class names.
-Phase 1 ships sniff/detect. load/run arrive with the modality phases.
+Phase 2 ships text load/run (Ollama or llama.cpp). Other modalities follow.
 """
 
 from __future__ import annotations

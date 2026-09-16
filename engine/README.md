@@ -1,6 +1,8 @@
-# Eclipse engine (Phase 1)
+# Eclipse engine (Phase 2)
 
 Headless local backend. Atelier (the APK, and this lab UI) talks to it on the LAN.
+
+Chat: Use a Ready text card, then **Chat → Send**. Tokens stream. Threads persist in `data/chats.json`. Runtime is Ollama on `127.0.0.1:11434` when those models were found on disk, otherwise llama-cpp-python against the GGUF path. No fake replies if neither is up.
 
 ```
 cd engine

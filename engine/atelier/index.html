@@ -34,6 +34,7 @@
       <nav class="modes">
         <button class="mode on" data-m="home">Home</button>
         <button class="mode" data-m="image">Image</button>
+        <button class="mode" data-m="chat">Chat</button>
         <button class="mode" data-m="library">Library</button>
         <button class="mode" data-m="jobs">Jobs</button>
       </nav>
@@ -45,9 +46,9 @@
           <p id="hero-line">Connecting…</p>
         </div>
         <div class="grid2">
-          <button class="tile" data-go="image" type="button">
+          <button class="tile" id="resume-tile" data-go="image" type="button">
             <div class="t">Resume</div>
-            <h3>Image</h3>
+            <h3 id="resume-mode">Image</h3>
             <p id="resume-line">mode sticky when you return</p>
           </button>
           <button class="tile" data-go="library" type="button">
@@ -93,6 +94,37 @@
         </div>
       </div>
 
+      <div id="screen-chat" class="screen">
+        <div class="chat-head">
+          <p class="kicker" id="chat-title">Chat</p>
+          <div class="chat-tools">
+            <input id="chat-find" placeholder="search" autocomplete="off" />
+            <button class="ghost" id="chat-new" type="button">New</button>
+          </div>
+        </div>
+        <div id="chat-threads" class="chat-threads"></div>
+        <div id="chat-log" class="chat-log">
+          <div class="empty-frame" id="chat-empty">
+            <span>No thread yet</span>
+            <small>Use a Ready text model in Library, then Send.</small>
+          </div>
+        </div>
+        <div class="prompt">
+          <textarea id="chat-input" placeholder="a line of dialogue…"></textarea>
+          <div class="prompt-row">
+            <span class="meta">
+              <select id="chat-persona" aria-label="Persona"></select>
+              <button class="q" id="q-persona" type="button" aria-label="What is a persona?">?</button>
+            </span>
+            <span class="meta">
+              <button class="ghost" id="chat-stop" type="button">Stop</button>
+              <button class="make" id="chat-send" type="button">Send</button>
+            </span>
+          </div>
+          <p class="err" id="chat-err"></p>
+        </div>
+      </div>
+
       <div id="screen-library" class="screen">
         <p class="kicker">Library</p>
         <p class="lede">Paste a link to download, or search the PC for models already on disk. <button class="q" id="q-paste" type="button" aria-label="How does paste-install work?">?</button></p>
@@ -126,6 +158,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

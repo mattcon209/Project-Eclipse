@@ -167,6 +167,34 @@ body { min-height: 100dvh; }
 .job h3 { font-size: 14px; font-weight: 500; margin: 4px 0; }
 .job p { font-size: 12px; color: var(--mute); }
 #image-err:empty { display: none; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-tools { display: flex; align-items: center; gap: 6px; }
+#chat-find {
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 6px 8px; font: 11px inherit; width: 108px;
+}
+.chat-threads { display: flex; gap: 6px; overflow: auto; min-height: 0; }
+.chip-thread {
+  flex: 0 0 auto; border: 1px solid var(--line); background: transparent; color: var(--mute);
+  font-size: 10px; letter-spacing: .08em; padding: 6px 10px; border-radius: 99px;
+  cursor: pointer; font-family: inherit; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip-thread.on { border-color: #2a221c; color: var(--text); background: #16120f; }
+.chat-log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+.turn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+}
+.turn.user { background: #16120f; border-color: #2a221c; }
+.turn .who { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--copper); margin-bottom: 4px; }
+.turn.assistant .who { color: var(--tungsten); }
+.turn .body { font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
+#chat-persona {
+  background: transparent; border: 0; color: var(--mute); font: 10px/1.2 ui-monospace, monospace;
+  max-width: 128px; outline: none;
+}
+#chat-stop { display: none; }
+#chat-stop.on { display: inline-block; }
+#chat-err:empty { display: none; }
 .mono {
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
   padding: 12px; font: 11px/1.45 ui-monospace, monospace; color: var(--mute);

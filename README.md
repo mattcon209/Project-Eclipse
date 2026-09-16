@@ -2,9 +2,11 @@
 
 Local-first AI studio. **Atelier** (Galaxy S24+ APK) talks to a headless engine on **MattsGamingPC**. Spec: `docs/`.
 
-## Phase 1 (now)
+## Phase 2 (now)
 
-Library + paste-link acquire (HF / GitHub / Civitai / folder) + detect + size-gate. Image **Make** is still honest: no fake picture until an image handler exists (Phase 3).
+Logged chats + GGUF text handler (Ollama if it’s running, else llama-cpp-python). History lives on the PC. Image **Make** is still honest until Phase 3.
+
+Library (Phase 1): paste-link acquire + Search this PC.
 
 ```bash
 cd engine

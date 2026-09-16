@@ -19,6 +19,10 @@ const helpCopy = {
     title: "Search this PC",
     body: "Looks on MattsGamingPC for models already installed — Hugging Face cache, Ollama, LM Studio, Downloads, common model folders. Nothing is copied. Ready cards point at the files where they sit. The phone never holds the weights.",
   },
+  persona: {
+    title: "Persona",
+    body: "A short system note that stays on every turn in this thread — a writer’s register, not a content filter. Hollow writer is for game copy. None is the raw model.",
+  },
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -83,6 +87,12 @@ function applyStatus(s) {
     ? `${gpu.name || "GPU"} · ${gpu.temp_c ?? "—"}° · ${mode ? mode + " warm" : "no mode yet"}`
     : `Engine live on ${s.resources?.hostname || "this box"} · GPU not visible here (will be on MattsGamingPC)`;
   $("#resume-line").textContent = mode ? mode + " still selected" : "tap Image to enter a mode";
+  const resume = $("#resume-tile");
+  if (resume && mode && ["image", "chat", "audio", "edit", "video", "talk"].includes(mode)) {
+    resume.dataset.go = mode;
+    const rh = $("#resume-mode");
+    if (rh) rh.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+  }
   $("#jobs-count").textContent = (s.jobs || 0) + " jobs";
   const ready = s.library?.ready;
   if ($("#lib-count")) $("#lib-count").textContent = (ready != null ? ready : 0) + " ready";
@@ -116,6 +126,7 @@ async function boot() {
     connectWs();
     refreshJobs();
     refreshLibrary();
+    refreshChats();
   } catch (e) {
     token = "";
     localStorage.removeItem(TOKEN_KEY);
@@ -138,6 +149,7 @@ $("#pair-btn").addEventListener("click", async () => {
     connectWs();
     refreshJobs();
     refreshLibrary();
+    refreshChats();
   } catch (e) {
     $("#pair-err").textContent = e.message || "Pair failed.";
   }
@@ -145,7 +157,7 @@ $("#pair-btn").addEventListener("click", async () => {
 
 function go(m) {
   document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
-  ["home", "image", "library", "jobs"].forEach((id) => {
+  ["home", "image", "chat", "library", "jobs"].forEach((id) => {
     const el = $("#screen-" + id);
     if (el) el.classList.toggle("on", id === m);
   });
@@ -155,6 +167,7 @@ function go(m) {
   }
   if (m === "jobs") refreshJobs();
   if (m === "library") refreshLibrary();
+  if (m === "chat") refreshChats();
 }
 
 document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", () => go(b.dataset.m)));
@@ -298,12 +311,13 @@ function renderLibrary(items) {
         let msg = `Loaded ${name}.`;
         if (used.attached === "lora") msg = `Attached LoRA ${name}.`;
         else if (fit.fits === false) msg = fit.reason || `${name} won’t fit VRAM.`;
-        else if ((used.record?.modality || "") === "text") msg = `Loaded ${name}. Chat handler is Phase 2.`;
+        else if ((used.record?.modality || "") === "text") msg = `Loaded ${name}.`;
         if (err) err.textContent = msg;
         const imageErr = $("#image-err");
         if (imageErr && used.record?.modality !== "text") imageErr.textContent = msg;
         const mod = used.record?.modality;
         if (mod === "image" || mod === "video") go("image");
+        if (mod === "text") go("chat");
       } catch (e) {
         if (err) err.textContent = e.message || "Use failed.";
       }
@@ -368,6 +382,207 @@ $("#lib-add").addEventListener("click", async () => {
   }
 });
 
+
+let currentThread = null;
+let chatBusy = false;
+
+function renderTurns(turns) {
+  const el = $("#chat-log");
+  if (!el) return;
+  if (!turns || !turns.length) {
+    el.innerHTML = '<div class="empty-frame" id="chat-empty"><span>No thread yet</span><small>Use a Ready text model in Library, then Send.</small></div>';
+    return;
+  }
+  el.innerHTML = turns
+    .map((t) => {
+      const who = t.role === "user" ? "you" : t.role === "system" ? "persona" : t.model_name || "atelier";
+      return `<article class="turn ${escapeHtml(t.role)}"><div class="who">${escapeHtml(who)}</div><div class="body">${escapeHtml(t.text || "")}</div></article>`;
+    })
+    .join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderThreadStrip(threads) {
+  const el = $("#chat-threads");
+  if (!el) return;
+  if (!threads.length) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = threads
+    .map((t) => {
+      const on = t.id === currentThread ? " on" : "";
+      return `<button type="button" class="chip-thread${on}" data-id="${escapeHtml(t.id)}">${escapeHtml(t.title || "New chat")}</button>`;
+    })
+    .join("");
+  el.querySelectorAll(".chip-thread").forEach((b) => {
+    b.addEventListener("click", () => openThread(b.dataset.id));
+  });
+}
+
+async function openThread(id) {
+  currentThread = id;
+  try {
+    const th = await api("/api/chats/" + id);
+    currentThread = th.id;
+    $("#chat-title").textContent = th.title || "Chat";
+    if (th.persona_id && $("#chat-persona")) $("#chat-persona").value = th.persona_id;
+    renderTurns(th.turns || []);
+    const list = await api("/api/chats");
+    renderThreadStrip(list.threads || []);
+  } catch (e) {
+    const err = $("#chat-err");
+    if (err) err.textContent = e.message || "Couldn’t open thread.";
+  }
+}
+
+async function refreshChats() {
+  try {
+    const q = ($("#chat-find") && $("#chat-find").value.trim()) || "";
+    const path = q ? "/api/chats?q=" + encodeURIComponent(q) : "/api/chats";
+    const r = await api(path);
+    renderThreadStrip(r.threads || []);
+    if (!currentThread && r.threads && r.threads[0]) {
+      await openThread(r.threads[0].id);
+    } else if (currentThread) {
+      renderThreadStrip(r.threads || []);
+    }
+    const personas = await api("/api/personas");
+    const sel = $("#chat-persona");
+    if (sel && sel.dataset.ready !== "1") {
+      sel.innerHTML = (personas.personas || [])
+        .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`)
+        .join("");
+      sel.dataset.ready = "1";
+    }
+  } catch (_) {}
+}
+
+function appendLocalTurn(role, text, extra) {
+  const el = $("#chat-log");
+  if (!el) return null;
+  if ($("#chat-empty")) el.innerHTML = "";
+  const art = document.createElement("article");
+  art.className = "turn " + role;
+  const who = role === "user" ? "you" : extra || "atelier";
+  art.innerHTML = `<div class="who">${escapeHtml(who)}</div><div class="body"></div>`;
+  art.querySelector(".body").textContent = text || "";
+  el.appendChild(art);
+  el.scrollTop = el.scrollHeight;
+  return art;
+}
+
+async function sendChat() {
+  const err = $("#chat-err");
+  if (err) err.textContent = "";
+  const input = $("#chat-input");
+  const prompt = (input && input.value) || "";
+  if (!prompt.trim()) {
+    if (err) err.textContent = "Type something first.";
+    return;
+  }
+  if (chatBusy) return;
+  chatBusy = true;
+  const stop = $("#chat-stop");
+  if (stop) stop.classList.add("on");
+  if (input) input.value = "";
+  appendLocalTurn("user", prompt);
+  const asst = appendLocalTurn("assistant", "");
+  const bodyEl = asst ? asst.querySelector(".body") : null;
+  const tid = currentThread || "new";
+  const persona = ($("#chat-persona") && $("#chat-persona").value) || "none";
+  try {
+    const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
+    if (token) headers.Authorization = "Bearer " + token;
+    const res = await fetch("/api/chats/" + tid + "/send", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt, persona_id: persona }),
+    });
+    const ctype = res.headers.get("content-type") || "";
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.reason || data.detail || res.statusText);
+    }
+    if (ctype.indexOf("text/event-stream") >= 0 && res.body) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let acc = "";
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buf += dec.decode(chunk.value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() || "";
+        for (const part of parts) {
+          const line = part.replace(/^data:\s*/, "").trim();
+          if (!line) continue;
+          let ev;
+          try { ev = JSON.parse(line); } catch (_) { continue; }
+          if (ev.type === "user" && ev.thread && ev.thread.id) currentThread = ev.thread.id;
+          if (ev.type === "token") {
+            acc += ev.text || "";
+            if (bodyEl) bodyEl.textContent = acc;
+            const log = $("#chat-log");
+            if (log) log.scrollTop = log.scrollHeight;
+          }
+          if (ev.type === "done") {
+            if (ev.thread && ev.thread.id) currentThread = ev.thread.id;
+            if (bodyEl) bodyEl.textContent = (ev.assistant && ev.assistant.text) || acc;
+            if (ev.ok === false && err) err.textContent = ev.reason || "";
+            if ($("#chat-title")) $("#chat-title").textContent = (ev.thread && ev.thread.title) || "Chat";
+          }
+        }
+      }
+    } else {
+      const data = await res.json();
+      if (data.thread && data.thread.id) currentThread = data.thread.id;
+      if (bodyEl) bodyEl.textContent = (data.assistant && data.assistant.text) || "";
+      if (data.ok === false && err) err.textContent = data.reason || "";
+    }
+    await refreshChats();
+  } catch (e) {
+    if (err) err.textContent = e.message || "Send failed.";
+    if (bodyEl && !bodyEl.textContent) bodyEl.textContent = e.message || "Send failed.";
+  } finally {
+    chatBusy = false;
+    if (stop) stop.classList.remove("on");
+  }
+}
+
+$("#chat-send").addEventListener("click", () => sendChat());
+$("#chat-new").addEventListener("click", async () => {
+  const err = $("#chat-err");
+  if (err) err.textContent = "";
+  try {
+    const persona = ($("#chat-persona") && $("#chat-persona").value) || "none";
+    const th = await api("/api/chats", { method: "POST", body: JSON.stringify({ persona_id: persona }) });
+    currentThread = th.id;
+    renderTurns([]);
+    $("#chat-title").textContent = th.title || "New chat";
+    await refreshChats();
+  } catch (e) {
+    if (err) err.textContent = e.message || "Couldn’t start a thread.";
+  }
+});
+$("#chat-stop").addEventListener("click", () => {
+  const tid = currentThread || "new";
+  api("/api/chats/" + tid + "/stop", { method: "POST", body: "{}" }).catch(() => {});
+});
+$("#q-persona").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openHelp("persona");
+});
+if ($("#chat-find")) {
+  $("#chat-find").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      refreshChats();
+    }
+  });
+}
+
 let wsHandle = null;
 let wsTimer = null;
 function connectWs() {
@@ -406,6 +621,7 @@ function onEnter(sel, btn) {
 onEnter("#pair-input", "#pair-btn");
 onEnter("#lib-url", "#lib-add");
 onEnter("#prompt", "#make");
+onEnter("#chat-input", "#chat-send");
 
 boot().catch((e) => {
   $("#pair-hint").textContent = "Cannot reach the engine. Is it running on this LAN?";

@@ -26,6 +26,10 @@ STATIC_BUTTON_IDS = [
     "q-search",
     "help-ok",
     "help-hide",
+    "chat-send",
+    "chat-new",
+    "chat-stop",
+    "q-persona",
 ]
 
 
@@ -45,6 +49,8 @@ def test_box57_search_and_add_have_click_listeners():
     assert re.search(r"""\$\([\"']#lib-add[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
     assert re.search(r"""\$\([\"']#make[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
     assert re.search(r"""\$\([\"']#pair-btn[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
+    assert re.search(r"""\$\([\"']#chat-send[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
+    assert re.search(r"""\$\([\"']#chat-new[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
 
 
 def test_box57_js_api_paths_exist_on_gateway():
@@ -62,6 +68,8 @@ def test_box57_js_api_paths_exist_on_gateway():
         ("/api/ladder", "post"),
         ("/api/mode", "post"),
         ("/api/library", "get"),
+        ("/api/chats", "get"),
+        ("/api/personas", "get"),
     ):
         fn = getattr(client, method)
         body = {} if method == "post" else None

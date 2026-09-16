@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,8 @@ from eclipse.acquire import scan_folder
 from eclipse.scan import scan_machine
 from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
-from eclipse.orchestrator import make_image, session, set_ladder, set_mode, use_model
+from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
+from eclipse.orchestrator import chat_send, chat_stop, make_image, session, set_ladder, set_mode, use_model
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -90,6 +92,21 @@ class SearchIn(BaseModel):
     extra: str = Field(default="", max_length=2000)
 
 
+class ChatNewIn(BaseModel):
+    title: str = Field(default="", max_length=80)
+    persona_id: str | None = None
+
+
+class ChatSendIn(BaseModel):
+    prompt: str = Field(default="", max_length=8000)
+    persona_id: str | None = None
+
+
+class PersonaIn(BaseModel):
+    name: str = Field(default="", max_length=40)
+    prompt: str = Field(default="", max_length=4000)
+
+
 def _auth(authorization: str | None) -> None:
     token = None
     if authorization and authorization.lower().startswith("bearer "):
@@ -110,7 +127,7 @@ def public_status() -> dict[str, Any]:
     return {
         "ok": True,
         "version": __version__,
-        "phase": 1,
+        "phase": 2,
         "engine": "running",
         "paired": is_paired(),
         "pairing": pair_status(),
@@ -127,7 +144,7 @@ def public_status() -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "phase": 1}
+    return {"ok": True, "version": __version__, "phase": 2}
 
 
 @app.get("/api/status")
@@ -280,6 +297,91 @@ def library_delete(item_id: str, authorization: str | None = Header(default=None
     if not rec:
         raise HTTPException(404, "No such library item.")
     return {"ok": True, "id": item_id}
+
+
+@app.get("/api/personas")
+def personas_list(authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return {"personas": personas()}
+
+
+@app.post("/api/personas")
+def personas_add(body: PersonaIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    rec = add_persona(body.name.strip(), body.prompt)
+    return {"ok": True, "persona": rec}
+
+
+@app.get("/api/chats")
+def chats_list(q: str = "", authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    items = chat_search(q) if q.strip() else list_threads()
+    return {"threads": items}
+
+
+@app.post("/api/chats")
+def chats_new(body: ChatNewIn | None = None, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    body = body or ChatNewIn()
+    sess = session()
+    rec = create_thread(
+        title=body.title,
+        model_id=sess.get("loaded"),
+        model_name=sess.get("loaded_name"),
+        persona_id=body.persona_id,
+    )
+    return rec
+
+
+@app.get("/api/chats/{thread_id}")
+def chats_one(thread_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    rec = get_thread(thread_id)
+    if not rec:
+        raise HTTPException(404, "No such thread.")
+    return rec
+
+
+@app.delete("/api/chats/{thread_id}")
+def chats_delete(thread_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    rec = delete_thread(thread_id)
+    if not rec:
+        raise HTTPException(404, "No such thread.")
+    return {"ok": True, "id": thread_id}
+
+
+@app.post("/api/chats/{thread_id}/send")
+def chats_send(
+    thread_id: str,
+    body: ChatSendIn,
+    authorization: str | None = Header(default=None),
+    accept: str | None = Header(default=None),
+):
+    _auth(authorization)
+    tid = None if thread_id in {"new", "-", "none"} else thread_id
+    prompt = body.prompt
+    if not (prompt or "").strip():
+        raise HTTPException(400, "Type something first.")
+    result = chat_send(prompt, thread_id=tid, persona_id=body.persona_id)
+    if accept and "text/event-stream" in accept.lower():
+        def gen():
+            if result.get("user"):
+                yield "data: " + json.dumps({"type": "user", "turn": result["user"], "thread": result.get("thread")}, default=str) + "\n\n"
+            for tok in result.get("tokens") or []:
+                yield "data: " + json.dumps({"type": "token", "text": tok}) + "\n\n"
+            done = {k: result.get(k) for k in ("ok", "refused", "reason", "thread", "assistant", "ttft_ms", "impl", "warm")}
+            done["type"] = "done"
+            yield "data: " + json.dumps(done, default=str) + "\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+    return result
+
+
+@app.post("/api/chats/{thread_id}/stop")
+def chats_stop(thread_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return chat_stop()
 
 
 @app.websocket("/api/ws")
