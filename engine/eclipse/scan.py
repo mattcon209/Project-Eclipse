@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Iterable
@@ -25,6 +26,7 @@ SKIP_DIR_NAMES = {
     "INetCache",
     "Packages",
     "Microsoft",
+    "OneDrive",  # scanned via explicit Downloads/Desktop roots
 }
 
 WEIGHT_SUFFIXES = {".gguf", ".ggml"}
@@ -35,7 +37,7 @@ def default_roots(home: Path | None = None) -> list[Path]:
     local = home / "AppData" / "Local"
     roaming = home / "AppData" / "Roaming"
     env: list[Path] = []
-    for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "OLLAMA_MODELS"):
+    for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "OLLAMA_MODELS", "LM_STUDIO_MODELS"):
         raw = os.environ.get(key)
         if raw:
             env.append(Path(raw).expanduser())
@@ -47,11 +49,19 @@ def default_roots(home: Path | None = None) -> list[Path]:
     guessed = [
         home / ".cache" / "huggingface" / "hub",
         home / ".cache" / "huggingface",
+        home / ".ollama",
         home / ".ollama" / "models",
+        local / "Ollama",
+        local / "Ollama" / "models",
+        home / ".lmstudio",
         home / ".lmstudio" / "models",
         home / ".cache" / "lm-studio",
         local / "lm-studio" / "models",
+        local / "LM-Studio",
+        roaming / "LM Studio",
         roaming / "LM Studio" / "models",
+        roaming / "Jan",
+        home / "jan" / "models",
         local / "nomic.ai" / "GPT4All",
         home / ".cache" / "gpt4all",
         home / "Documents" / "LM Studio" / "models",
@@ -68,6 +78,10 @@ def default_roots(home: Path | None = None) -> list[Path]:
         home / "Desktop",
         home / "OneDrive" / "Desktop",
     ]
+    for letter in "CDEFG":
+        for tail in ("models", "Models", "AI", "LLM", "llms", "LM Studio", "Ollama", "gguf"):
+            guessed.append(Path(f"{letter}:/{tail}"))
+    guessed.extend(_lmstudio_configured_dirs(home))
     out: list[Path] = []
     seen: set[str] = set()
     for p in env + guessed:
@@ -83,6 +97,83 @@ def default_roots(home: Path | None = None) -> list[Path]:
         seen.add(key)
         out.append(resolved)
     return out
+
+
+def _lmstudio_configured_dirs(home: Path) -> list[Path]:
+    """LM Studio lets you pick a model folder. Read it if the json is there."""
+    found: list[Path] = []
+    for cfg in (
+        home / ".lmstudio" / "settings.json",
+        home / ".lmstudio" / "user-settings.json",
+        home / ".lmstudio" / "config.json",
+    ):
+        if not cfg.is_file():
+            continue
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        found.extend(_paths_in_json(data))
+    return found
+
+
+def _paths_in_json(obj: Any) -> list[Path]:
+    out: list[Path] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key = str(k).lower()
+            if isinstance(v, str) and any(w in key for w in ("path", "folder", "directory", "dir")):
+                p = Path(v)
+                if p.exists():
+                    out.append(p)
+            else:
+                out.extend(_paths_in_json(v))
+    elif isinstance(obj, list):
+        for v in obj:
+            out.extend(_paths_in_json(v))
+    return out
+
+
+def ollama_blob_names(models_root: Path) -> dict[str, str]:
+    """Map blob path → llama3.2:latest style name from Ollama manifests."""
+    mapping: dict[str, str] = {}
+    manifests = models_root / "manifests"
+    blobs = models_root / "blobs"
+    if not manifests.exists():
+        # models_root may already be ~/.ollama
+        alt = models_root / "models" / "manifests"
+        blobs = models_root / "models" / "blobs" if alt.exists() else blobs
+        manifests = alt if alt.exists() else manifests
+    if not manifests.exists():
+        return mapping
+    for p in manifests.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        parts = list(p.parts)
+        name = p.parent.name
+        if "library" in parts:
+            i = parts.index("library")
+            model = parts[i + 1] if i + 1 < len(parts) else name
+            tag = parts[i + 2] if i + 2 < len(parts) else ""
+            name = f"{model}:{tag}" if tag and tag not in {model, "latest"} else model
+        elif len(parts) >= 2:
+            name = parts[-2] if p.name == "latest" else p.name
+        digests: list[str] = []
+        for layer in data.get("layers") or []:
+            if isinstance(layer, dict) and layer.get("digest"):
+                digests.append(str(layer["digest"]))
+        cfg = data.get("config")
+        if isinstance(cfg, dict) and cfg.get("digest"):
+            digests.append(str(cfg["digest"]))
+        for digest in digests:
+            hx = digest.split(":", 1)[-1]
+            blob = blobs / f"sha256-{hx}"
+            mapping[str(blob)] = name
+    return mapping
 
 
 def find_candidates(root: Path, *, max_depth: int = 8, limit: int = 400) -> list[Path]:
@@ -110,6 +201,7 @@ def find_candidates(root: Path, *, max_depth: int = 8, limit: int = 400) -> list
             if len(found) >= limit:
                 break
             continue
+        blob_dir = p.name.lower() == "blobs"
         for fn in filenames:
             if fn.endswith(".part"):
                 continue
@@ -117,8 +209,9 @@ def find_candidates(root: Path, *, max_depth: int = 8, limit: int = 400) -> list
             low = fn.lower()
             if Path(low).suffix in WEIGHT_SUFFIXES:
                 found.append(fp)
-            elif p.name.lower() == "blobs" and _looks_gguf(fp):
-                found.append(fp)
+            elif blob_dir or low.startswith("sha256-"):
+                if _looks_gguf(fp):
+                    found.append(fp)
             if len(found) >= limit:
                 return found
         if len(found) >= limit:
@@ -134,7 +227,8 @@ def _looks_gguf(path: Path) -> bool:
         return False
 
 
-def ingest(paths: Iterable[Path], lib: Library) -> tuple[list[dict[str, Any]], int, int]:
+def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], int, int]:
+    names = names or {}
     added: list[dict[str, Any]] = []
     new = 0
     dup = 0
@@ -149,6 +243,7 @@ def ingest(paths: Iterable[Path], lib: Library) -> tuple[list[dict[str, Any]], i
             dup += 1
             continue
         info = sniff(resolved)
+        display = names.get(str(resolved)) or info["name"]
         if resolved.is_file():
             try:
                 size = resolved.stat().st_size
@@ -158,7 +253,7 @@ def ingest(paths: Iterable[Path], lib: Library) -> tuple[list[dict[str, Any]], i
             size = sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
         rec = lib.add(
             {
-                "name": info["name"],
+                "name": display,
                 "source": str(resolved),
                 "source_kind": "scan",
                 "path": str(resolved),
@@ -187,7 +282,10 @@ def scan_folder(path: str | Path, lib: Library | None = None) -> list[dict[str, 
     root = Path(path).expanduser()
     if not root.exists():
         raise FileNotFoundError("That folder isn’t on this PC.")
-    items, _, _ = ingest(find_candidates(root), lib)
+    names = ollama_blob_names(root)
+    if (root / "models").exists():
+        names.update(ollama_blob_names(root / "models"))
+    items, _, _ = ingest(find_candidates(root), lib, names)
     return items
 
 
@@ -206,7 +304,15 @@ def scan_machine(
             if key not in {str(r.resolve()) for r in roots}:
                 roots.append(p)
     job = create_job("scan", "Search this PC", {"roots": [str(r) for r in roots]})
-    append_log(job["id"], f"Looking in {len(roots)} folder(s) on this PC — files stay where they are.", state="running", progress=5)
+    append_log(
+        job["id"],
+        f"Looking in {len(roots)} folder(s) on this PC — files stay where they are.",
+        state="running",
+        progress=5,
+    )
+    names: dict[str, str] = {}
+    for root in roots:
+        names.update(ollama_blob_names(root))
     found: list[Path] = []
     seen: set[str] = set()
     for root in roots:
@@ -216,7 +322,7 @@ def scan_machine(
                 continue
             seen.add(key)
             found.append(cand)
-    items, new, dup = ingest(found, lib)
+    items, new, dup = ingest(found, lib, names)
     ready = sum(1 for it in items if it.get("state") == "ready")
     append_log(
         job["id"],

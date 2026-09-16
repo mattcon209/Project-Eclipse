@@ -259,6 +259,42 @@ function renderLibrary(items) {
   });
 }
 
+async function searchThisPc() {
+  const btn = $("#lib-search");
+  const err = $("#lib-err");
+  if (!btn || !err) return;
+  err.textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Searching…";
+  try {
+    const r = await api("/api/library/search", { method: "POST", body: JSON.stringify({}) });
+    await refreshLibrary();
+    applyStatus(await api("/api/status"));
+    const n = r.added || 0;
+    const ready = r.ready || 0;
+    const found = r.found || 0;
+    const roots = (r.roots || []).length;
+    if (found || ready) {
+      err.textContent = `Found ${found} · added ${n} · ${ready} Ready. Looked in ${roots} folder(s). Files stayed on the PC.`;
+    } else {
+      err.textContent = `Looked in ${roots} folder(s), found 0. Ollama blobs and LM Studio paths are included. If they’re on another drive, set ECLIPSE_SCAN_ROOTS.`;
+    }
+  } catch (e) {
+    const d = e.data || {};
+    err.textContent = d.reason || e.message || "Search failed. Pull latest and restart the engine.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Search this PC";
+  }
+}
+
+const libSearchBtn = $("#lib-search");
+if (libSearchBtn) libSearchBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  searchThisPc();
+});
+
 $("#lib-add").addEventListener("click", async () => {
   $("#lib-err").textContent = "";
   const url = $("#lib-url").value.trim();

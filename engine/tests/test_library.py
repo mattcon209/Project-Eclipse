@@ -380,3 +380,30 @@ def test_box55_atelier_has_search_button():
     r = c.get("/")
     assert r.status_code == 200
     assert "Search this PC" in r.text
+    js = c.get("/app.js?v=3")
+    assert js.status_code == 200
+    assert "searchThisPc" in js.text
+    assert "/api/library/search" in js.text
+
+
+def test_box56_ollama_blob_without_gguf_suffix(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    blobs = home / ".ollama" / "models" / "blobs"
+    blobs.mkdir(parents=True)
+    blob = blobs / "sha256-deadbeefcafebabe"
+    blob.write_bytes(b"GGUF" + b"\0" * 64)
+    manifests = home / ".ollama" / "models" / "manifests" / "registry.ollama.ai" / "library" / "llama3.2"
+    manifests.mkdir(parents=True)
+    (manifests / "latest").write_text(
+        json.dumps({"layers": [{"digest": "sha256:deadbeefcafebabe", "mediaType": "application/vnd.ollama.image.model"}]}),
+        encoding="utf-8",
+    )
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    assert out["added"] >= 1
+    rec = next(r for r in out["items"] if r["state"] == "ready")
+    assert rec["managed"] is False
+    assert rec["modality"] == "text"
+    assert "llama3.2" in rec["name"]
