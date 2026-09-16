@@ -5,7 +5,10 @@ from typing import Any
 
 from eclipse.chats import append_turn, create_thread, get_thread, messages_for, save_thread, update_turn
 from eclipse.config import DATA_DIR, PROJECT_DEFAULT
-from eclipse.jobs import append_log, create as create_job
+import threading
+
+from eclipse.image_runtime import IMAGE, ImageError
+from eclipse.jobs import append_log, create as create_job, update as job_update
 from eclipse.library import get_item, register_card
 from eclipse.pass_through import unchanged
 from eclipse.resource_os import OS
@@ -102,8 +105,14 @@ def use_model(item_id: str) -> dict[str, Any]:
         raise ValueError("Not Ready — still in Inbox. Identify it or paste a different link.")
     if rec.get("state") != "ready":
         raise ValueError("Not Ready yet.")
-    if rec.get("modality") == "lora":
+    if rec.get("modality") == "lora" or rec.get("handler") in {"vae", "clip", "lora"}:
         data = _state.read()
+        if rec.get("handler") in {"vae", "clip"}:
+            extras = dict(data.get("companions") or {})
+            extras[rec["handler"]] = rec["id"]
+            data["companions"] = extras
+            _state.write(data)
+            return {"ok": True, "attached": rec["handler"], "record": rec, "session": session()}
         loras = list(data.get("loras") or [])
         if rec["id"] not in loras:
             loras.append(rec["id"])
@@ -153,12 +162,17 @@ def make_image(prompt: str) -> dict[str, Any]:
     if data.get("mode") != "image":
         set_mode("image")
         data = session()
+    rec = get_item(data.get("loaded")) if data.get("loaded") else None
+    seed = int(data.get("seed") or 441029)
+    ladder = data.get("ladder") or "balanced"
     job = create_job(
         "image",
         (prompt or "untitled")[:80],
-        {"prompt": prompt, "ladder": data.get("ladder"), "seed": data.get("seed")},
+        {"prompt": prompt, "ladder": ladder, "seed": seed},
     )
-    result = OS.run(prompt, ladder=data.get("ladder") or "balanced", job_id=job["id"])
+    if rec and rec.get("state") == "ready":
+        register_card(rec)
+    result = OS.run(prompt, ladder=ladder, job_id=job["id"])
     if result.refused:
         append_log(job["id"], result.refuse_reason or "Refused.", state="blocked", progress=0)
         reason = (result.refuse_reason or "").lower()
@@ -172,13 +186,46 @@ def make_image(prompt: str) -> dict[str, Any]:
     if result.queued:
         append_log(job["id"], "Queued — one heavy GPU job at a time.", state="queued", progress=0)
         return get_job_safe(job["id"])
+    if not rec or rec.get("modality") not in {"image", "video"} or rec.get("handler") in {"vae", "clip"}:
+        if rec and rec.get("handler") in {"vae", "clip"}:
+            append_log(job["id"], "Pick the diffusion UNET in Image, not the VAE or CLIP.", state="blocked")
+        else:
+            append_log(job["id"], "No image model loaded. Nothing was faked.", state="blocked")
+        return get_job_safe(job["id"])
     append_log(job["id"], "first_byte", state="running", progress=1)
-    append_log(
-        job["id"],
-        "Model is Ready. Image handler ships in Phase 3 — nothing was faked.",
-        state="blocked",
-    )
+    if not data.get("seed_lock"):
+        sess = _state.read()
+        sess["seed"] = (seed + 1) % (2**32)
+        _state.write(sess)
+    args = (job["id"], rec, prompt, ladder, seed)
+    if IMAGE._stub is not None:
+        _run_image(*args)
+    else:
+        threading.Thread(target=_run_image, args=args, daemon=True).start()
     return get_job_safe(job["id"])
+
+
+def _run_image(job_id: str, rec: dict[str, Any], prompt: str, ladder: str, seed: int) -> None:
+    if not OS.begin_heavy(job_id):
+        append_log(job_id, "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return
+    try:
+        out = IMAGE.generate(rec, prompt, ladder=ladder, seed=seed, job_id=job_id)
+        job_update(job_id, artifact=out.get("path"), error=None)
+        append_log(
+            job_id,
+            f"still {out.get('width')} · {out.get('steps')} steps · seed {seed} · {out.get('impl')}",
+            state="done",
+            progress=100,
+        )
+    except ImageError as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    except Exception as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    finally:
+        OS.end_heavy(job_id)
 
 
 def get_job_safe(job_id: str) -> dict[str, Any]:

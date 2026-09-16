@@ -121,6 +121,9 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert 'id="later-empty"' in HTML
     assert "fillPicks" in JS
     assert "by_mode" in JS
+    assert "showStill" in JS
+    assert 'id="still"' in HTML
+    assert 'handler === "t2i"' in JS or "handler === 't2i'" in JS
     css = (ROOT / "atelier" / "atelier.css").read_text(encoding="utf-8")
     assert "100dvh" in css
     assert ".chat-log" in css

@@ -1,0 +1,341 @@
+"""Image handler — Qwen / Comfy-style split weights via local ComfyUI.
+
+ComfyUI is a runtime, like Ollama for GGUF. GameAI UI and workflows are not copied.
+Stub is for tests only. Production never writes a fake still.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable
+
+from eclipse.config import DATA_DIR
+from eclipse.library import list_items
+
+COMFY = os.environ.get("ECLIPSE_COMFY", "http://127.0.0.1:8188").rstrip("/")
+
+LADDER = {
+    "fast": {"steps": 8, "cfg": 2.5, "width": 512, "height": 512},
+    "balanced": {"steps": 20, "cfg": 2.5, "width": 768, "height": 768},
+    "quality": {"steps": 28, "cfg": 3.5, "width": 768, "height": 768},
+    "max": {"steps": 40, "cfg": 4.0, "width": 1024, "height": 1024},
+}
+
+
+class ImageError(RuntimeError):
+    pass
+
+
+class ImageEngine:
+    def __init__(self) -> None:
+        self._stub: Callable[..., bytes] | None = None
+        self._stop = False
+        self._proc: subprocess.Popen | None = None
+        self.impl: str | None = None
+        self.loads = 0
+
+    def set_stub(self, fn: Callable[..., bytes] | None) -> None:
+        self._stub = fn
+        self.impl = "stub" if fn is not None else None
+
+    def stop(self) -> None:
+        self._stop = True
+        try:
+            _http("POST", COMFY + "/interrupt", {}, timeout=2)
+        except ImageError:
+            pass
+
+    def generate(
+        self,
+        rec: dict[str, Any],
+        prompt: str,
+        *,
+        ladder: str = "balanced",
+        seed: int = 441029,
+        job_id: str = "still",
+    ) -> dict[str, Any]:
+        self._stop = False
+        if rec.get("handler") in {"vae", "clip", "lora"}:
+            raise ImageError("Pick the diffusion model in Image, not a VAE / CLIP / LoRA.")
+        if rec.get("handler") not in {"t2i", None} and rec.get("modality") != "image":
+            raise ImageError("No image model loaded.")
+        opts = LADDER.get(ladder) or LADDER["balanced"]
+        if self._stub is not None:
+            self.impl = "stub"
+            self.loads += 1
+            png = self._stub(rec, prompt, ladder, seed)
+            path = _write_still(job_id, png)
+            return {"path": str(path), "impl": "stub", "steps": opts["steps"], "seed": seed, "width": opts["width"]}
+        stack = resolve_stack(rec)
+        self.impl = "comfy"
+        _ensure_comfy()
+        self.loads += 1
+        png = _comfy_run(stack, prompt, opts, seed, job_id, lambda: self._stop)
+        path = _write_still(job_id, png)
+        return {
+            "path": str(path),
+            "impl": "comfy",
+            "steps": opts["steps"],
+            "seed": seed,
+            "width": opts["width"],
+            "height": opts["height"],
+            "unet": stack["unet_name"],
+        }
+
+
+IMAGE = ImageEngine()
+
+
+def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
+    unet_path = Path(rec.get("path") or rec.get("source") or "")
+    unet_name = unet_path.name if unet_path.name else str(rec.get("name") or "")
+    items = list_items()
+    vae_name = _pick_name(items, "vae") or _beside(unet_path, "vae", ("qwen_image_vae.safetensors",))
+    clip_name = _pick_name(items, "clip") or _beside(
+        unet_path,
+        "text_encoders",
+        ("qwen_2.5_vl_7b_fp8_scaled.safetensors", "qwen_2.5_vl_7b.safetensors"),
+    )
+    if not vae_name or not clip_name:
+        raise ImageError(
+            "Qwen Image needs the UNET plus VAE and CLIP on disk "
+            "(models/vae/qwen_image_vae.safetensors and models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors). "
+            "Search this PC again."
+        )
+    dtype = "fp8_e4m3fn" if "fp8" in unet_name.lower() else "default"
+    return {"unet_name": unet_name, "vae_name": vae_name, "clip_name": clip_name, "dtype": dtype}
+
+
+def _pick_name(items: list[dict[str, Any]], handler: str) -> str | None:
+    for it in items:
+        if it.get("state") == "ready" and it.get("handler") == handler:
+            p = Path(it.get("path") or "")
+            if p.name:
+                return p.name
+    return None
+
+
+def _beside(unet: Path, folder: str, names: tuple[str, ...]) -> str | None:
+    if not unet:
+        return None
+    parent = unet.parent
+    models = parent.parent if parent.name.lower() in {"diffusion_models", "unet", "checkpoints"} else parent
+    d = models / folder
+    for n in names:
+        if (d / n).is_file():
+            return n
+    if d.is_dir():
+        for p in sorted(d.iterdir()):
+            if p.suffix.lower() == ".safetensors":
+                return p.name
+    return None
+
+
+def _write_still(job_id: str, png: bytes) -> Path:
+    if not png or png[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ImageError("Runtime returned bytes that are not a PNG. Nothing was faked.")
+    folder = Path(DATA_DIR) / "stills"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{job_id}.png"
+    path.write_bytes(png)
+    return path
+
+
+def _comfy_run(
+    stack: dict[str, str],
+    prompt: str,
+    opts: dict[str, Any],
+    seed: int,
+    job_id: str,
+    stopped: Callable[[], bool],
+) -> bytes:
+    graph = _workflow(stack, prompt, opts, seed, job_id)
+    try:
+        queued = _http("POST", COMFY + "/prompt", {"prompt": graph, "client_id": "eclipse-" + job_id}, timeout=30)
+    except ImageError as e:
+        raise ImageError(f"ComfyUI rejected the graph: {e}") from e
+    err = queued.get("error") or queued.get("node_errors")
+    if err:
+        raise ImageError(f"ComfyUI rejected the graph: {err}")
+    pid = queued.get("prompt_id") or queued.get("promptId")
+    if not pid:
+        raise ImageError("ComfyUI did not return a prompt_id.")
+    deadline = time.time() + 900
+    while time.time() < deadline:
+        if stopped():
+            raise ImageError("Cancelled.")
+        hist = _http("GET", COMFY + "/history/" + str(pid), timeout=8)
+        rec = hist.get(str(pid)) or hist.get(pid) or {}
+        status = (rec.get("status") or {})
+        if status.get("status_str") == "error" or rec.get("status_str") == "error":
+            raise ImageError(_status_error(rec) or "ComfyUI job failed.")
+        images = _history_images(rec)
+        if images:
+            meta = images[0]
+            return _view(meta)
+        time.sleep(0.6)
+    raise ImageError("ComfyUI timed out waiting for a still.")
+
+
+def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: int, job_id: str) -> dict[str, Any]:
+    unet = stack["unet_name"]
+    latent = "EmptySD3LatentImage" if "edit" in unet.lower() else "EmptyLatentImage"
+    return {
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": int(seed) % (2**32),
+                "steps": int(opts["steps"]),
+                "cfg": float(opts["cfg"]),
+                "sampler_name": "euler",
+                "scheduler": "simple",
+                "denoise": 1.0,
+                "model": ["4", 0],
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": ["5", 0],
+            },
+        },
+        "4": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": stack["dtype"]}},
+        "5": {"class_type": latent, "inputs": {"width": int(opts["width"]), "height": int(opts["height"]), "batch_size": 1}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["8", 0]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["8", 0]}},
+        "8": {"class_type": "CLIPLoader", "inputs": {"clip_name": stack["clip_name"], "type": "qwen_image"}},
+        "9": {"class_type": "VAELoader", "inputs": {"vae_name": stack["vae_name"]}},
+        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
+        "11": {"class_type": "SaveImage", "inputs": {"filename_prefix": "eclipse-" + job_id, "images": ["10", 0]}},
+    }
+
+
+def _history_images(rec: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    outputs = rec.get("outputs") or {}
+    if not isinstance(outputs, dict):
+        return out
+    for node in outputs.values():
+        if not isinstance(node, dict):
+            continue
+        for im in node.get("images") or []:
+            if isinstance(im, dict) and im.get("filename"):
+                out.append(im)
+    return out
+
+
+def _status_error(rec: dict[str, Any]) -> str:
+    msgs = ((rec.get("status") or {}).get("messages")) or rec.get("messages") or []
+    bits = []
+    for m in msgs:
+        bits.append(json.dumps(m, default=str)[:400] if not isinstance(m, str) else m)
+    return " ".join(bits)[:800]
+
+
+def _view(meta: dict[str, Any]) -> bytes:
+    q = urllib.parse.urlencode(
+        {
+            "filename": meta.get("filename") or "",
+            "subfolder": meta.get("subfolder") or "",
+            "type": meta.get("type") or "output",
+        }
+    )
+    url = COMFY + "/view?" + q
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            return r.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise ImageError(f"Could not fetch the still from ComfyUI: {e}") from e
+
+
+def _ensure_comfy() -> None:
+    if _comfy_up():
+        return
+    main = _comfy_main()
+    py = _comfy_python(main.parent) if main else None
+    if not main or not py:
+        raise ImageError(
+            "No image runtime. Start ComfyUI on 127.0.0.1:8188 (GameAI\\ComfyUI) or set ECLIPSE_COMFY. "
+            "Weights stay on disk; nothing was faked."
+        )
+    creation = 0x00000008 if os.name == "nt" else 0  # DETACHED_PROCESS on Windows
+    IMAGE._proc = subprocess.Popen(
+        [str(py), str(main), "--listen", "127.0.0.1", "--port", "8188", "--lowvram"],
+        cwd=str(main.parent),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation if os.name == "nt" else 0,
+    )
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if _comfy_up():
+            return
+        time.sleep(0.5)
+    raise ImageError("ComfyUI was started but did not come up on 8188.")
+
+
+def _comfy_up() -> bool:
+    for path in ("/system_stats", "/object_info", "/"):
+        try:
+            urllib.request.urlopen(COMFY + path, timeout=1.2).read(64)
+            return True
+        except (urllib.error.URLError, TimeoutError, OSError):
+            continue
+    return False
+
+
+def _comfy_main() -> Path | None:
+    home = Path.home()
+    for p in (
+        home / "GameAI" / "ComfyUI" / "main.py",
+        home / "ComfyUI" / "main.py",
+        home / "ComfyUI_windows_portable" / "ComfyUI" / "main.py",
+        Path(os.environ.get("ECLIPSE_COMFY_ROOT", "")) / "main.py",
+    ):
+        if p.is_file():
+            return p
+    return None
+
+
+def _comfy_python(root: Path) -> Path | None:
+    for p in (
+        root / "venv" / "Scripts" / "python.exe",
+        root / ".venv" / "Scripts" / "python.exe",
+        root / "python_embeded" / "python.exe",
+        root / "venv" / "bin" / "python",
+        root / ".venv" / "bin" / "python",
+        Path(sys.executable),
+    ):
+        if p.is_file():
+            return p
+    return None
+
+
+def _http(method: str, url: str, body: dict[str, Any] | None = None, timeout: float = 30) -> dict[str, Any]:
+    data = None if body is None or method == "GET" else json.dumps(body).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:400]
+        raise ImageError(detail or str(e)) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise ImageError(str(e)) from e
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

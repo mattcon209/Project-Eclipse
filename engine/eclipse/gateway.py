@@ -27,6 +27,7 @@ from eclipse.scan import scan_machine
 from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
+from eclipse.image_runtime import IMAGE
 from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, use_model
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
@@ -131,7 +132,7 @@ def public_status() -> dict[str, Any]:
     return {
         "ok": True,
         "version": __version__,
-        "phase": 2,
+        "phase": 3,
         "engine": "running",
         "paired": is_paired(),
         "pairing": pair_status(),
@@ -148,7 +149,7 @@ def public_status() -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "phase": 2}
+    return {"ok": True, "version": __version__, "phase": 3}
 
 
 @app.get("/api/status")
@@ -205,10 +206,23 @@ def job(job_id: str, authorization: str | None = Header(default=None)) -> dict:
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel(job_id: str, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
+    IMAGE.stop()
     j = job_cancel(job_id)
     if not j:
         raise HTTPException(404, "No such job.")
     return j
+
+
+@app.get("/api/jobs/{job_id}/still")
+def job_still(job_id: str, authorization: str | None = Header(default=None)) -> FileResponse:
+    _auth(authorization)
+    j = job_get(job_id)
+    if not j:
+        raise HTTPException(404, "No such job.")
+    path = Path(j.get("artifact") or "")
+    if not path.is_file():
+        raise HTTPException(404, "No still yet.")
+    return FileResponse(path, media_type="image/png")
 
 
 @app.post("/api/mode")

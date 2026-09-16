@@ -114,6 +114,8 @@ body { height: 100dvh; max-height: 100dvh; overflow: hidden; }
   border: 1px dashed #2a2420; margin: 10px; border-radius: 4px;
 }
 .empty-frame small { color: var(--faint); font-size: 11px; text-align: center; padding: 0 16px; }
+.still { width: 100%; height: 100%; object-fit: contain; display: block; background: #0a0908; }
+.still.hidden { display: none !important; }
 .filmstock {
   position: absolute; left: 10px; bottom: 10px;
   font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: .08em; color: #ddd4c6;

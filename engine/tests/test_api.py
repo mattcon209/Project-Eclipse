@@ -27,7 +27,7 @@ def test_box16_health():
     r = c.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
-    assert r.json()["phase"] == 2
+    assert r.json()["phase"] == 3
 
 
 def test_box17_status_unpaired_has_code():

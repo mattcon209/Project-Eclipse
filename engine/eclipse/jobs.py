@@ -57,5 +57,16 @@ def append_log(job_id: str, line: str, state: str | None = None, progress: int |
     return None
 
 
+def update(job_id: str, **fields: Any) -> dict | None:
+    data = _store.read()
+    for j in data["jobs"]:
+        if j["id"] == job_id:
+            j.update(fields)
+            j["updated"] = time.time()
+            _store.write(data)
+            return j
+    return None
+
+
 def cancel(job_id: str) -> dict | None:
     return append_log(job_id, "Cancelled.", state="cancelled")

@@ -224,6 +224,12 @@ def _sniff_config(path: Path, display: str) -> dict[str, Any]:
 def _guess_from_name(blob: str) -> dict[str, Any] | None:
     """Filename / path hints. Never a silent Ready for unknown families."""
     n = blob.lower().replace(" ", "-").replace("_", "-")
+    if "lora" in n:
+        return None
+    if any(x in n for x in ("/vae/", "\\vae\\", "/models/vae", "-vae.", "_vae.", "/vae\\")):
+        return {"modality": "vae", "handler": "vae", "notes": "VAE companion."}
+    if any(x in n for x in ("/text-encoders/", "/text_encoders/", "\\text_encoders\\", "/clip/", "\\clip\\", "/models/clip", "qwen-2.5-vl", "qwen2.5-vl")):
+        return {"modality": "clip", "handler": "clip", "notes": "Text encoder / CLIP companion."}
     image_needles = (
         "qwen-image",
         "qwenimage",
@@ -247,8 +253,6 @@ def _guess_from_name(blob: str) -> dict[str, Any] | None:
         "/models/stable-diffusion",
     )
     if any(x in n for x in image_needles):
-        if "lora" in n:
-            return None
         return {"modality": "image", "handler": "t2i", "notes": "Image weights (name/path)."}
     if any(x in n for x in ("ltxv", "cogvideo", "hunyuan-video", "wan2.1", "wan-2", "text-to-video", "mochi-1")):
         return {"modality": "video", "handler": "t2v", "notes": "Video weights (name/path)."}

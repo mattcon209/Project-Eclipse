@@ -38,7 +38,7 @@ const LATER = {
   audio: ["Audio", "Audio handler is Phase 4. Nothing was faked."],
   video: ["Video", "Video handler is Phase 7. Nothing was faked."],
   talk: ["Talk", "Talk handler is Phase 5. Nothing was faked."],
-  edit: ["Edit", "Edit handler is Phase 3. Nothing was faked."],
+  edit: ["Edit", "Image edit is a later hop. Stills are Phase 3."],
 };
 
 function clock() {
@@ -224,7 +224,7 @@ function fillPicks() {
   }
   const img = $("#image-model");
   if (img) {
-    const pics = ready.filter((i) => i.modality === "image" || i.modality === "video");
+    const pics = ready.filter((i) => i.handler === "t2i");
     const cur = (by.image && by.image.id) || (mode === "image" ? loaded : "") || img.value;
     img.innerHTML = '<option value="">image model…</option>' + pics.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`).join("");
     if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;
@@ -286,14 +286,46 @@ $("#make").addEventListener("click", async () => {
   const err = $("#image-err");
   if (err) err.textContent = "";
   const prompt = $("#prompt").value.trim();
+  const btn = $("#make");
+  if (btn) btn.disabled = true;
   try {
-    const job = await api("/api/make", { method: "POST", body: JSON.stringify({ prompt }) });
-    go("jobs");
-    renderJobs([job, ...((await api("/api/jobs")).jobs || []).filter((j) => j.id !== job.id)]);
+    let job = await api("/api/make", { method: "POST", body: JSON.stringify({ prompt }) });
+    if (err) err.textContent = (job.log && job.log[job.log.length - 1] && job.log[job.log.length - 1].line) || "";
+    for (let i = 0; i < 900; i++) {
+      if (job.artifact) {
+        await showStill(job);
+        break;
+      }
+      if (job.state === "blocked" || job.state === "cancelled" || job.state === "done") break;
+      await new Promise((r) => setTimeout(r, 1000));
+      job = await api("/api/jobs/" + job.id);
+      if (err && job.log && job.log.length) err.textContent = job.log[job.log.length - 1].line || "";
+    }
+    if (!job.artifact && err && !err.textContent) err.textContent = "Make finished without a still.";
+    refreshJobs();
   } catch (e) {
     if (err) err.textContent = e.message || "Make failed.";
+  } finally {
+    if (btn) btn.disabled = false;
   }
 });
+
+async function showStill(job) {
+  const headers = {};
+  if (token) headers.Authorization = "Bearer " + token;
+  const res = await fetch("/api/jobs/" + job.id + "/still", { headers });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const img = $("#still");
+  const empty = $("#canvas-empty");
+  if (!img) return;
+  if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+  const url = URL.createObjectURL(blob);
+  img.dataset.url = url;
+  img.src = url;
+  img.classList.remove("hidden");
+  if (empty) empty.classList.add("hidden");
+}
 
 async function refreshJobs() {
   try {
