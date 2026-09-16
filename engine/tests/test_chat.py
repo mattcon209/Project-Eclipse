@@ -181,9 +181,17 @@ def test_box67_chat_api_roundtrip(tmp_path):
 def test_box68_stream_first_token_before_done(tmp_path):
     rec = _ready_text(tmp_path)
     use_model(rec["id"])
+    from eclipse.orchestrator import iter_chat
+
+    kinds = []
+    for ev in iter_chat("fog"):
+        kinds.append(ev["type"])
+    assert kinds[0] == "user"
+    assert "token" in kinds
+    assert kinds[-1] == "done"
+    assert kinds.index("token") < kinds.index("done")
     out = chat_send("fog")
     assert out["ok"] is True
-    assert out.get("tokens")
     assert out.get("first_byte") == "first_byte"
     assert "".join(out["tokens"]) == out["assistant"]["text"]
 

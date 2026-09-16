@@ -156,24 +156,20 @@ def get_job_safe(job_id: str) -> dict[str, Any]:
     return get(job_id) or {}
 
 
-def chat_send(
+def iter_chat(
     prompt: str,
     *,
     thread_id: str | None = None,
     persona_id: str | None = None,
-) -> dict[str, Any]:
-    """Complete one turn. Tokens are in result['tokens'] so the HTTP layer can stream."""
+):
+    """Yield user / token / done as the runtime produces them. Prompt is never rewritten."""
     prompt = unchanged(prompt)
     data = session()
     model_id = data.get("loaded")
     rec = get_item(model_id) if model_id else None
     if data.get("mode") != "chat":
-        if rec and rec.get("modality") == "text":
-            set_mode("chat")
-            data = session()
-        else:
-            set_mode("chat")
-            data = session()
+        set_mode("chat")
+        data = session()
     thread = get_thread(thread_id) if thread_id else None
     if not thread:
         thread = create_thread(
@@ -195,121 +191,86 @@ def chat_send(
 
     user = append_turn(thread["id"], "user", prompt, model_id=model_id)
     thread = get_thread(thread["id"]) or thread
+    yield {"type": "user", "turn": user, "thread": thread}
 
-    if not rec or rec.get("modality") != "text":
-        asst = append_turn(
-            thread["id"],
-            "assistant",
-            "No text model loaded. Use a Ready text card in Library, then Send.",
-            error=True,
-        )
+    def _fail(reason: str, **extra: Any):
+        asst = append_turn(thread["id"], "assistant", reason, error=True)
         return {
+            "type": "done",
             "ok": False,
             "refused": True,
-            "reason": "No text model loaded.",
+            "reason": reason,
             "thread": get_thread(thread["id"]),
             "user": user,
             "assistant": asst,
-            "tokens": [],
-            "warm": False,
+            "tokens": extra.pop("tokens", []),
+            "warm": extra.pop("warm", False),
+            **extra,
         }
+
+    if not rec or rec.get("modality") != "text":
+        yield _fail("No text model loaded. Use a Ready text card in Library, then Send.")
+        return
 
     register_card(rec)
     ladder = data.get("ladder") or "balanced"
     est = OS.estimate(rec["id"], ladder)
     if not est.fits:
-        asst = append_turn(thread["id"], "assistant", est.reason or "Won’t fit VRAM.", error=True)
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": est.reason,
-            "thread": get_thread(thread["id"]),
-            "user": user,
-            "assistant": asst,
-            "tokens": [],
-            "warm": False,
-            "fit": {"fits": False, "vram_mb": est.vram_mb, "reason": est.reason},
-        }
+        yield _fail(
+            est.reason or "Won’t fit VRAM.",
+            fit={"fits": False, "vram_mb": est.vram_mb, "reason": est.reason},
+        )
+        return
 
     result = OS.run(prompt, ladder=ladder, job_id="chat-" + thread["id"])
     if result.refused:
-        asst = append_turn(thread["id"], "assistant", result.refuse_reason or "Refused.", error=True)
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": result.refuse_reason,
-            "thread": get_thread(thread["id"]),
-            "user": user,
-            "assistant": asst,
-            "tokens": [],
-            "warm": False,
-        }
+        yield _fail(result.refuse_reason or "Refused.")
+        return
     if result.queued:
-        asst = append_turn(
-            thread["id"],
-            "assistant",
-            "Queued — one heavy GPU job at a time.",
-            error=True,
-        )
-        return {
-            "ok": False,
-            "queued": True,
-            "reason": "Queued — one heavy GPU job at a time.",
-            "thread": get_thread(thread["id"]),
-            "user": user,
-            "assistant": asst,
-            "tokens": [],
-            "warm": True,
-        }
+        yield _fail("Queued — one heavy GPU job at a time.", queued=True, warm=True)
+        return
 
     try:
         load_info = ENGINE.load(rec)
     except TextError as e:
-        asst = append_turn(thread["id"], "assistant", str(e), error=True)
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": str(e),
-            "thread": get_thread(thread["id"]),
-            "user": user,
-            "assistant": asst,
-            "tokens": [],
-            "warm": False,
-        }
+        yield _fail(str(e))
+        return
 
     msgs = messages_for(thread)
     tokens: list[str] = []
     t0 = time.time()
     ttft_ms = None
+    name = rec.get("ollama_name") or rec.get("name")
+    asst = append_turn(
+        thread["id"],
+        "assistant",
+        "",
+        model_id=rec["id"],
+        model_name=name,
+        impl=ENGINE.impl,
+    )
     try:
         for piece in ENGINE.generate(msgs, ladder=ladder):
             if ttft_ms is None:
                 ttft_ms = int((time.time() - t0) * 1000)
             tokens.append(piece)
+            yield {"type": "token", "text": piece, "ttft_ms": ttft_ms}
+            if len(tokens) % 12 == 0:
+                update_turn(thread["id"], asst["id"], text="".join(tokens), ttft_ms=ttft_ms)
     except TextError as e:
-        asst = append_turn(thread["id"], "assistant", str(e), error=True)
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": str(e),
-            "thread": get_thread(thread["id"]),
-            "user": user,
-            "assistant": asst,
-            "tokens": tokens,
-            "warm": load_info.get("warm"),
-        }
+        yield _fail(str(e), tokens=tokens, warm=load_info.get("warm"))
+        return
 
-    full = "".join(tokens)
-    asst = append_turn(
+    asst = update_turn(
         thread["id"],
-        "assistant",
-        full,
-        model_id=rec["id"],
-        model_name=rec.get("ollama_name") or rec.get("name"),
+        asst["id"],
+        text="".join(tokens),
         ttft_ms=ttft_ms,
         impl=ENGINE.impl,
-    )
-    return {
+        model_name=name,
+    ) or asst
+    yield {
+        "type": "done",
         "ok": True,
         "refused": False,
         "thread": get_thread(thread["id"]),
@@ -321,6 +282,26 @@ def chat_send(
         "impl": ENGINE.impl,
         "first_byte": "first_byte" if tokens else "",
     }
+
+
+def chat_send(
+    prompt: str,
+    *,
+    thread_id: str | None = None,
+    persona_id: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"tokens": []}
+    for ev in iter_chat(prompt, thread_id=thread_id, persona_id=persona_id):
+        kind = ev.get("type")
+        if kind == "token":
+            result["tokens"].append(ev.get("text") or "")
+        elif kind == "user":
+            result["user"] = ev.get("turn")
+            result["thread"] = ev.get("thread")
+        elif kind == "done":
+            result.update(ev)
+    result.pop("type", None)
+    return result
 
 
 def chat_stop() -> dict[str, Any]:

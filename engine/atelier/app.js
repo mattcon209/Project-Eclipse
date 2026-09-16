@@ -529,6 +529,14 @@ async function sendChat() {
           if (ev.type === "token") {
             acc += ev.text || "";
             if (bodyEl) bodyEl.textContent = acc;
+            if (ev.ttft_ms != null && asst) {
+              const whoEl = asst.querySelector(".who");
+              const name = chatModelLabel() || "model";
+              if (whoEl && whoEl.dataset.ttft !== "1") {
+                whoEl.textContent = name + (ev.ttft_ms < 1000 ? " · " + ev.ttft_ms + "ms" : " · " + (ev.ttft_ms / 1000).toFixed(1) + "s");
+                whoEl.dataset.ttft = "1";
+              }
+            }
             const log = $("#chat-log");
             if (log) log.scrollTop = log.scrollHeight;
           }
@@ -536,7 +544,11 @@ async function sendChat() {
             if (ev.thread && ev.thread.id) currentThread = ev.thread.id;
             if (bodyEl) bodyEl.textContent = (ev.assistant && ev.assistant.text) || acc;
             const whoEl = asst && asst.querySelector(".who");
-            if (whoEl) whoEl.textContent = (ev.assistant && ev.assistant.model_name) || chatModelLabel() || "model";
+            if (whoEl) {
+              const name = (ev.assistant && ev.assistant.model_name) || chatModelLabel() || "model";
+              const ms = ev.ttft_ms;
+              whoEl.textContent = ms == null ? name : name + (ms < 1000 ? " · " + ms + "ms" : " · " + (ms / 1000).toFixed(1) + "s");
+            }
             if (ev.ok === false && err) err.textContent = ev.reason || "";
           }
         }

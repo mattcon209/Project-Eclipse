@@ -27,7 +27,7 @@ from eclipse.scan import scan_machine
 from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
-from eclipse.orchestrator import chat_send, chat_stop, make_image, session, set_ladder, set_mode, use_model
+from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, use_model
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -105,6 +105,10 @@ class ChatSendIn(BaseModel):
 class PersonaIn(BaseModel):
     name: str = Field(default="", max_length=40)
     prompt: str = Field(default="", max_length=4000)
+
+
+def _sse(obj: Any) -> str:
+    return "data: " + json.dumps(obj, default=str) + "\n\n"
 
 
 def _auth(authorization: str | None) -> None:
@@ -363,19 +367,17 @@ def chats_send(
     prompt = body.prompt
     if not (prompt or "").strip():
         raise HTTPException(400, "Type something first.")
-    result = chat_send(prompt, thread_id=tid, persona_id=body.persona_id)
     if accept and "text/event-stream" in accept.lower():
         def gen():
-            if result.get("user"):
-                yield "data: " + json.dumps({"type": "user", "turn": result["user"], "thread": result.get("thread")}, default=str) + "\n\n"
-            for tok in result.get("tokens") or []:
-                yield "data: " + json.dumps({"type": "token", "text": tok}) + "\n\n"
-            done = {k: result.get(k) for k in ("ok", "refused", "reason", "thread", "assistant", "ttft_ms", "impl", "warm")}
-            done["type"] = "done"
-            yield "data: " + json.dumps(done, default=str) + "\n\n"
+            for ev in iter_chat(prompt, thread_id=tid, persona_id=body.persona_id):
+                yield _sse(ev)
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
-    return result
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return chat_send(prompt, thread_id=tid, persona_id=body.persona_id)
 
 
 @app.post("/api/chats/{thread_id}/stop")
