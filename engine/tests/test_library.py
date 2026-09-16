@@ -380,7 +380,7 @@ def test_box55_atelier_has_search_button():
     r = c.get("/")
     assert r.status_code == 200
     assert "Search this PC" in r.text
-    js = c.get("/app.js?v=3")
+    js = c.get("/app.js")
     assert js.status_code == 200
     assert "searchThisPc" in js.text
     assert "/api/library/search" in js.text

@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -33,7 +35,21 @@ from eclipse.watchdog import start as wd_start
 ROOT = Path(__file__).resolve().parent.parent
 ATELIER = ROOT / "atelier"
 
-app = FastAPI(title="Eclipse Engine", version=__version__)
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    wd_start()
+    if not cal_get().get("at"):
+        cal_run()
+    ps = pair_status()
+    if ps.get("paired"):
+        print("Eclipse engine paired.", flush=True)
+    else:
+        print(f"Pairing code: {ps.get('code')}  (Atelier → Pair this phone)", flush=True)
+    yield
+
+
+app = FastAPI(title="Eclipse Engine", version=__version__, lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -107,18 +123,6 @@ def public_status() -> dict[str, Any]:
         "vram_chip": vram,
         "now": time.time(),
     }
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    wd_start()
-    if not cal_get().get("at"):
-        cal_run()
-    ps = pair_status()
-    if ps.get("paired"):
-        print("Eclipse engine paired.", flush=True)
-    else:
-        print(f"Pairing code: {ps.get('code')}  (Atelier → Pair this phone)", flush=True)
 
 
 @app.get("/api/health")
@@ -308,6 +312,14 @@ def index() -> FileResponse:
     if not page.exists():
         raise HTTPException(404, "Atelier UI missing.")
     return FileResponse(page)
+
+
+@app.get("/favicon.ico")
+def favicon() -> FileResponse:
+    path = ATELIER / "favicon.svg"
+    if path.is_file():
+        return FileResponse(path, media_type="image/svg+xml")
+    raise HTTPException(404)
 
 
 @app.get("/{name}")

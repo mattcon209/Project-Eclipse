@@ -38,7 +38,14 @@ async function api(path, opts = {}) {
   const res = await fetch(path, Object.assign({}, opts, { headers }));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error || data.detail || res.statusText);
+    let msg = res.statusText;
+    if (typeof data.reason === "string" && data.reason) msg = data.reason;
+    else if (typeof data.error === "string" && data.error) msg = data.error;
+    else if (typeof data.detail === "string" && data.detail) msg = data.detail;
+    else if (Array.isArray(data.detail) && data.detail[0]) {
+      msg = data.detail[0].msg || data.detail[0].message || JSON.stringify(data.detail[0]);
+    }
+    const err = new Error(msg);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -108,6 +115,7 @@ async function boot() {
     applyStatus(st);
     connectWs();
     refreshJobs();
+    refreshLibrary();
   } catch (e) {
     token = "";
     localStorage.removeItem(TOKEN_KEY);
@@ -160,10 +168,16 @@ document.querySelectorAll(".lad").forEach((b) => {
 });
 
 $("#make").addEventListener("click", async () => {
+  const err = $("#image-err");
+  if (err) err.textContent = "";
   const prompt = $("#prompt").value.trim();
-  const job = await api("/api/make", { method: "POST", body: JSON.stringify({ prompt }) });
-  go("jobs");
-  renderJobs([job, ...((await api("/api/jobs")).jobs || []).filter((j) => j.id !== job.id)]);
+  try {
+    const job = await api("/api/make", { method: "POST", body: JSON.stringify({ prompt }) });
+    go("jobs");
+    renderJobs([job, ...((await api("/api/jobs")).jobs || []).filter((j) => j.id !== job.id)]);
+  } catch (e) {
+    if (err) err.textContent = e.message || "Make failed.";
+  }
 });
 
 async function refreshJobs() {
@@ -182,9 +196,23 @@ function renderJobs(jobs) {
   el.innerHTML = jobs
     .map((j) => {
       const last = (j.log && j.log[j.log.length - 1] && j.log[j.log.length - 1].line) || "";
-      return `<article class="job"><div class="st">${j.state} · ${j.kind}</div><h3>${escapeHtml(j.title)}</h3><p>${escapeHtml(last)}</p></article>`;
+      const canCancel = j.state === "queued" || j.state === "running" || j.state === "downloading";
+      const cancel = canCancel
+        ? `<button type="button" class="ghost cancel" data-id="${escapeHtml(j.id)}">Cancel</button>`
+        : "";
+      return `<article class="job"><div class="st"><span>${escapeHtml(j.state)} · ${escapeHtml(j.kind)}</span>${cancel}</div><h3>${escapeHtml(j.title)}</h3><p>${escapeHtml(last)}</p></article>`;
     })
     .join("");
+  el.querySelectorAll(".cancel").forEach((b) => {
+    b.addEventListener("click", async () => {
+      try {
+        await api("/api/jobs/" + b.dataset.id + "/cancel", { method: "POST", body: "{}" });
+        await refreshJobs();
+      } catch (e) {
+        b.textContent = e.message || "Failed";
+      }
+    });
+  });
 }
 
 function escapeHtml(s) {
@@ -192,14 +220,23 @@ function escapeHtml(s) {
 }
 
 $("#recal").addEventListener("click", async () => {
-  await api("/api/calibrate", { method: "POST" });
-  applyStatus(await api("/api/status"));
+  const err = $("#lib-err");
+  if (err) err.textContent = "";
+  try {
+    await api("/api/calibrate", { method: "POST" });
+    applyStatus(await api("/api/status"));
+    if (err) err.textContent = "Calibrated.";
+  } catch (e) {
+    if (err) err.textContent = e.message || "Calibrate failed.";
+  }
 });
 
 function openHelp(key) {
   if (hiddenHelp[key]) return;
-  $("#help-title").textContent = helpCopy[key].title;
-  $("#help-body").textContent = helpCopy[key].body;
+  const copy = helpCopy[key];
+  if (!copy) return;
+  $("#help-title").textContent = copy.title;
+  $("#help-body").textContent = copy.body;
   $("#help").dataset.key = key;
   $("#help").classList.add("on");
 }
@@ -237,7 +274,7 @@ function renderLibrary(items) {
   const el = $("#lib-list");
   if (!el) return;
   if (!items.length) {
-    el.innerHTML = '<p class="faint">Empty. Paste a link — Ready cards land here. Unknown files go to Inbox, never silent Ready.</p>';
+    el.innerHTML = '<p class="faint">Empty. Search this PC for models already on disk, or paste a link. Unknown files go to Inbox, never silent Ready.</p>';
     return;
   }
   el.innerHTML = items
@@ -251,10 +288,25 @@ function renderLibrary(items) {
     .join("");
   el.querySelectorAll(".use").forEach((b) => {
     b.addEventListener("click", async () => {
-      const used = await api("/api/library/" + b.dataset.id + "/use", { method: "POST", body: "{}" });
-      applyStatus(await api("/api/status"));
-      const mod = used.record?.modality;
-      if (mod === "image" || mod === "video") go("image");
+      const err = $("#lib-err");
+      if (err) err.textContent = "";
+      try {
+        const used = await api("/api/library/" + b.dataset.id + "/use", { method: "POST", body: "{}" });
+        applyStatus(await api("/api/status"));
+        const name = used.record?.name || "model";
+        const fit = used.fit || {};
+        let msg = `Loaded ${name}.`;
+        if (used.attached === "lora") msg = `Attached LoRA ${name}.`;
+        else if (fit.fits === false) msg = fit.reason || `${name} won’t fit VRAM.`;
+        else if ((used.record?.modality || "") === "text") msg = `Loaded ${name}. Chat handler is Phase 2.`;
+        if (err) err.textContent = msg;
+        const imageErr = $("#image-err");
+        if (imageErr && used.record?.modality !== "text") imageErr.textContent = msg;
+        const mod = used.record?.modality;
+        if (mod === "image" || mod === "video") go("image");
+      } catch (e) {
+        if (err) err.textContent = e.message || "Use failed.";
+      }
     });
   });
 }
@@ -298,6 +350,10 @@ if (libSearchBtn) libSearchBtn.addEventListener("click", (e) => {
 $("#lib-add").addEventListener("click", async () => {
   $("#lib-err").textContent = "";
   const url = $("#lib-url").value.trim();
+  if (!url) {
+    $("#lib-err").textContent = "Paste a link, or Search this PC.";
+    return;
+  }
   try {
     const r = await api("/api/library/acquire", { method: "POST", body: JSON.stringify({ url }) });
     if (r.needs_confirm) {
@@ -312,16 +368,44 @@ $("#lib-add").addEventListener("click", async () => {
   }
 });
 
+let wsHandle = null;
+let wsTimer = null;
 function connectWs() {
+  if (!token) return;
+  if (wsHandle && (wsHandle.readyState === 0 || wsHandle.readyState === 1)) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
+  wsHandle = ws;
   ws.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type === "status") applyStatus(msg.payload);
     } catch (_) {}
   };
+  ws.onclose = () => {
+    if (wsHandle === ws) wsHandle = null;
+    const app = $("#view-app");
+    if (token && app && !app.classList.contains("hidden")) {
+      clearTimeout(wsTimer);
+      wsTimer = setTimeout(connectWs, 2500);
+    }
+  };
 }
+
+function onEnter(sel, btn) {
+  const el = $(sel);
+  if (!el) return;
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const b = $(btn);
+      if (b) b.click();
+    }
+  });
+}
+onEnter("#pair-input", "#pair-btn");
+onEnter("#lib-url", "#lib-add");
+onEnter("#prompt", "#make");
 
 boot().catch((e) => {
   $("#pair-hint").textContent = "Cannot reach the engine. Is it running on this LAN?";

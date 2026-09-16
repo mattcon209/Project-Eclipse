@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
   <title>Atelier</title>
+  <link rel="icon" href="/favicon.ico" />
   <link rel="stylesheet" href="/atelier.css" />
 </head>
 <body>
@@ -71,7 +72,7 @@
         <div class="canvas">
           <div class="empty-frame" id="canvas-empty">
             <span>No still yet</span>
-            <small>Make is honest. Paste a model link in Library first.</small>
+            <small>Make is honest. Search this PC or paste a link in Library first.</small>
           </div>
           <div class="filmstock" id="filmstock">— · — · seed — · balanced</div>
         </div>
@@ -88,6 +89,7 @@
             <span class="meta">1024 · seed lock <button class="q" id="q-seed" type="button">?</button></span>
             <button class="make" id="make" type="button">Make</button>
           </div>
+          <p class="err" id="image-err"></p>
         </div>
       </div>
 
@@ -124,6 +126,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=3"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>

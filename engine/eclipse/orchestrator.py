@@ -126,7 +126,7 @@ def make_image(prompt: str) -> dict[str, Any]:
         if "model" in reason:
             append_log(
                 job["id"],
-                "Paste a Hugging Face or GitHub link in Library. Nothing was faked.",
+                "Search this PC or paste a Hugging Face / GitHub link in Library. Nothing was faked.",
                 state="blocked",
             )
         return get_job_safe(job["id"])

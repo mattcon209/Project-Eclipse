@@ -225,6 +225,23 @@ private suspend fun acquire(host: String, token: String, url: String): String = 
     }
 }
 
+private suspend fun searchPc(host: String, token: String): String = withContext(Dispatchers.IO) {
+    val longHttp = http.newBuilder().readTimeout(120, TimeUnit.SECONDS).build()
+    val req = Request.Builder()
+        .url(host.trimEnd('/') + "/api/library/search")
+        .header("Authorization", "Bearer $token")
+        .post("{}".toRequestBody("application/json".toMediaType()))
+        .build()
+    longHttp.newCall(req).execute().use { res ->
+        val json = JSONObject(res.body?.string() ?: "{}")
+        if (!res.isSuccessful) error(json.optString("detail", json.optString("error", "Search failed")))
+        val found = json.optInt("found")
+        val added = json.optInt("added")
+        val ready = json.optInt("ready")
+        "Found $found · added $added · $ready Ready"
+    }
+}
+
 private suspend fun fetchStatus(host: String, token: String): String = withContext(Dispatchers.IO) {
     val b = Request.Builder().url(host.trimEnd('/') + "/api/status")
     if (token.isNotBlank()) b.header("Authorization", "Bearer $token")

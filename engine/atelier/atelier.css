@@ -162,9 +162,11 @@ body { min-height: 100dvh; }
 .job {
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
 }
-.job .st { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--copper); }
+.job .st { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--copper); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.job .cancel { padding: 4px 8px; font-size: 9px; letter-spacing: .1em; }
 .job h3 { font-size: 14px; font-weight: 500; margin: 4px 0; }
 .job p { font-size: 12px; color: var(--mute); }
+#image-err:empty { display: none; }
 .mono {
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
   padding: 12px; font: 11px/1.45 ui-monospace, monospace; color: var(--mute);

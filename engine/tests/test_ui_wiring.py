@@ -1,0 +1,105 @@
+"""Every button in the lab UI must have a listener. Catch the Search-this-PC class of bug."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from eclipse.gateway import app
+
+ROOT = Path(__file__).resolve().parents[1]
+HTML = (ROOT / "atelier" / "index.html").read_text(encoding="utf-8")
+JS = (ROOT / "atelier" / "app.js").read_text(encoding="utf-8")
+
+# Static buttons that must be wired in app.js (not dynamically rendered).
+STATIC_BUTTON_IDS = [
+    "pair-btn",
+    "make",
+    "lib-search",
+    "lib-add",
+    "recal",
+    "q-ladder",
+    "q-seed",
+    "q-paste",
+    "q-search",
+    "help-ok",
+    "help-hide",
+]
+
+
+def test_box57_every_static_button_is_in_html_and_js():
+    for bid in STATIC_BUTTON_IDS:
+        assert f'id="{bid}"' in HTML, f"HTML missing #{bid}"
+        assert bid in JS, f"app.js never mentions #{bid} — unattached control"
+
+
+def test_box57_search_and_add_have_click_listeners():
+    assert "searchThisPc" in JS
+    assert "/api/library/search" in JS
+    assert "/api/library/acquire" in JS
+    assert "addEventListener" in JS
+    # Search must actually bind a click, not just define a function
+    assert re.search(r"lib-search[\s\S]{0,200}addEventListener\(\s*[\"']click[\"']", JS)
+    assert re.search(r"""\$\([\"']#lib-add[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
+    assert re.search(r"""\$\([\"']#make[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
+    assert re.search(r"""\$\([\"']#pair-btn[\"']\)\.addEventListener\(\s*[\"']click[\"']""", JS)
+
+
+def test_box57_js_api_paths_exist_on_gateway():
+    paths = set(re.findall(r"""["'](/api/[^"'?\s]+)""", JS))
+    assert "/api/library/search" in paths
+    assert "/api/make" in paths
+    client = TestClient(app)
+    # Unpaired: these must not 404 (missing route). 401/409/405 ok.
+    for path, method in (
+        ("/api/library/search", "post"),
+        ("/api/library/acquire", "post"),
+        ("/api/make", "post"),
+        ("/api/jobs", "get"),
+        ("/api/calibrate", "post"),
+        ("/api/ladder", "post"),
+        ("/api/mode", "post"),
+        ("/api/library", "get"),
+    ):
+        fn = getattr(client, method)
+        body = {} if method == "post" else None
+        r = fn(path, json=body) if body is not None else fn(path)
+        assert r.status_code != 404, f"{method.upper()} {path} is not mounted"
+
+
+def test_box57_favicon_is_not_404():
+    c = TestClient(app)
+    r = c.get("/favicon.ico")
+    assert r.status_code == 200
+
+
+def test_box57_html_buttons_match_live_index():
+    c = TestClient(app)
+    live = c.get("/").text
+    for bid in STATIC_BUTTON_IDS:
+        assert f'id="{bid}"' in live
+
+
+def test_box57_jobs_cancel_and_boot_refresh_library():
+    assert "/api/jobs/" in JS
+    assert "cancel" in JS
+    assert re.search(r"async function boot\([\s\S]*?refreshLibrary", JS)
+
+
+def test_box57_android_searchpc_is_defined():
+    kt = (
+        ROOT.parent
+        / "atelier-android"
+        / "app"
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "eclipse"
+        / "atelier"
+        / "MainActivity.kt"
+    ).read_text(encoding="utf-8")
+    assert "fun searchPc" in kt
+    assert "/api/library/search" in kt
