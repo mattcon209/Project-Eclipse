@@ -168,6 +168,7 @@ def test_box67_chat_api_roundtrip(tmp_path):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
+    assert body["assistant"].get("model_name") == "scene-q4"
     assert "wet concrete hallway" in body["assistant"]["text"]
     tid = body["thread"]["id"]
     listed = c.get("/api/chats", headers=h)

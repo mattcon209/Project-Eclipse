@@ -168,6 +168,7 @@ body { min-height: 100dvh; }
 .job p { font-size: 12px; color: var(--mute); }
 #image-err:empty { display: none; }
 .chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#chat-title { text-transform: none; letter-spacing: .08em; }
 .chat-tools { display: flex; align-items: center; gap: 6px; }
 #chat-find {
   background: var(--surface); border: 1px solid var(--line); color: var(--text);

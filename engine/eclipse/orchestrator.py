@@ -104,7 +104,7 @@ def use_model(item_id: str) -> dict[str, Any]:
     data["view"] = mode
     data["mode_entered"] = time.time()
     data["loaded"] = rec["id"]
-    data["loaded_name"] = rec.get("name")
+    data["loaded_name"] = rec.get("ollama_name") or rec.get("name")
     OS.enter_mode(mode, rec["id"])
     _state.write(data)
     if modality == "text":
@@ -190,7 +190,7 @@ def chat_send(
         save_thread(thread)
     if rec:
         thread["model_id"] = rec["id"]
-        thread["model_name"] = rec.get("name")
+        thread["model_name"] = rec.get("ollama_name") or rec.get("name")
         save_thread(thread)
 
     user = append_turn(thread["id"], "user", prompt, model_id=model_id)
@@ -305,7 +305,7 @@ def chat_send(
         "assistant",
         full,
         model_id=rec["id"],
-        model_name=rec.get("name"),
+        model_name=rec.get("ollama_name") or rec.get("name"),
         ttft_ms=ttft_ms,
         impl=ENGINE.impl,
     )

@@ -106,6 +106,8 @@ function applyStatus(s) {
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
   const loaded = s.session?.loaded_name || "—";
   $("#filmstock").textContent = `${loaded} · — · seed ${s.session?.seed ?? "—"} · ${lad}`;
+  const ct = $("#chat-title");
+  if (ct) ct.textContent = s.session?.loaded_name || "Chat";
 }
 
 async function boot() {
@@ -386,6 +388,10 @@ $("#lib-add").addEventListener("click", async () => {
 let currentThread = null;
 let chatBusy = false;
 
+function chatModelLabel() {
+  return (lastStatus && lastStatus.session && lastStatus.session.loaded_name) || "";
+}
+
 function renderTurns(turns) {
   const el = $("#chat-log");
   if (!el) return;
@@ -395,7 +401,7 @@ function renderTurns(turns) {
   }
   el.innerHTML = turns
     .map((t) => {
-      const who = t.role === "user" ? "you" : t.role === "system" ? "persona" : t.model_name || "atelier";
+      const who = t.role === "user" ? "you" : t.role === "system" ? "persona" : (t.model_name || chatModelLabel() || "model");
       return `<article class="turn ${escapeHtml(t.role)}"><div class="who">${escapeHtml(who)}</div><div class="body">${escapeHtml(t.text || "")}</div></article>`;
     })
     .join("");
@@ -425,7 +431,6 @@ async function openThread(id) {
   try {
     const th = await api("/api/chats/" + id);
     currentThread = th.id;
-    $("#chat-title").textContent = th.title || "Chat";
     if (th.persona_id && $("#chat-persona")) $("#chat-persona").value = th.persona_id;
     renderTurns(th.turns || []);
     const list = await api("/api/chats");
@@ -464,7 +469,7 @@ function appendLocalTurn(role, text, extra) {
   if ($("#chat-empty")) el.innerHTML = "";
   const art = document.createElement("article");
   art.className = "turn " + role;
-  const who = role === "user" ? "you" : extra || "atelier";
+  const who = role === "user" ? "you" : extra || chatModelLabel() || "model";
   art.innerHTML = `<div class="who">${escapeHtml(who)}</div><div class="body"></div>`;
   art.querySelector(".body").textContent = text || "";
   el.appendChild(art);
@@ -530,8 +535,9 @@ async function sendChat() {
           if (ev.type === "done") {
             if (ev.thread && ev.thread.id) currentThread = ev.thread.id;
             if (bodyEl) bodyEl.textContent = (ev.assistant && ev.assistant.text) || acc;
+            const whoEl = asst && asst.querySelector(".who");
+            if (whoEl) whoEl.textContent = (ev.assistant && ev.assistant.model_name) || chatModelLabel() || "model";
             if (ev.ok === false && err) err.textContent = ev.reason || "";
-            if ($("#chat-title")) $("#chat-title").textContent = (ev.thread && ev.thread.title) || "Chat";
           }
         }
       }
@@ -539,6 +545,8 @@ async function sendChat() {
       const data = await res.json();
       if (data.thread && data.thread.id) currentThread = data.thread.id;
       if (bodyEl) bodyEl.textContent = (data.assistant && data.assistant.text) || "";
+      const whoEl = asst && asst.querySelector(".who");
+      if (whoEl) whoEl.textContent = (data.assistant && data.assistant.model_name) || chatModelLabel() || "model";
       if (data.ok === false && err) err.textContent = data.reason || "";
     }
     await refreshChats();
@@ -560,7 +568,6 @@ $("#chat-new").addEventListener("click", async () => {
     const th = await api("/api/chats", { method: "POST", body: JSON.stringify({ persona_id: persona }) });
     currentThread = th.id;
     renderTurns([]);
-    $("#chat-title").textContent = th.title || "New chat";
     await refreshChats();
   } catch (e) {
     if (err) err.textContent = e.message || "Couldn’t start a thread.";
