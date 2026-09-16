@@ -10,3 +10,7 @@ node_modules/
 *.aab
 local.properties
 *.iml
+engine/data/
+.gradle/
+build/
+app/build/

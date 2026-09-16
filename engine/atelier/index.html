@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>Atelier</title>
+  <link rel="stylesheet" href="/atelier.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="dyn"></div>
+    <header class="clockbar"><span id="clock">--:--</span><span>atelier</span></header>
+
+    <section id="view-pair" class="view">
+      <div class="word">Atelier</div>
+      <p class="kicker">Pair to the engine</p>
+      <h1 id="pair-code" class="code">••••••</h1>
+      <p class="lede" id="pair-hint">Enter the code shown on MattsGamingPC. Same LAN. No cloud.</p>
+      <input id="pair-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off" />
+      <button class="make" id="pair-btn" type="button">Pair this phone</button>
+      <p class="err" id="pair-err"></p>
+    </section>
+
+    <section id="view-app" class="view hidden">
+      <div class="topbar">
+        <div class="word">Atelier</div>
+        <div class="chips">
+          <div class="chip" id="chip-engine">engine</div>
+          <div class="chip" id="chip-vram">vram —</div>
+        </div>
+      </div>
+      <nav class="modes">
+        <button class="mode on" data-m="home">Home</button>
+        <button class="mode" data-m="image">Image</button>
+        <button class="mode" data-m="jobs">Jobs</button>
+        <button class="mode" data-m="more">More</button>
+      </nav>
+
+      <div id="screen-home" class="screen on">
+        <div class="hero-card">
+          <div class="label">Project</div>
+          <h2 id="project-name">Hollow</h2>
+          <p id="hero-line">Connecting…</p>
+        </div>
+        <div class="grid2">
+          <button class="tile" data-go="image" type="button">
+            <div class="t">Resume</div>
+            <h3>Image</h3>
+            <p id="resume-line">mode sticky when you return</p>
+          </button>
+          <button class="tile" data-go="jobs" type="button">
+            <div class="t">Queue</div>
+            <h3 id="jobs-count">0 jobs</h3>
+            <p>nothing running</p>
+          </button>
+          <div class="tile">
+            <div class="t">Box</div>
+            <h3 id="host-name">—</h3>
+            <p id="gpu-line">GPU pending</p>
+          </div>
+          <div class="tile">
+            <div class="t">Disk</div>
+            <h3 id="disk-line">—</h3>
+            <p id="ram-line">RAM —</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen-image" class="screen">
+        <div class="canvas">
+          <div class="empty-frame" id="canvas-empty">
+            <span>No still yet</span>
+            <small>Make is honest. No model is installed in Phase 0.</small>
+          </div>
+          <div class="filmstock" id="filmstock">— · — · seed — · balanced</div>
+        </div>
+        <div class="ladder">
+          <button class="lad" data-l="fast">Fast</button>
+          <button class="lad on" data-l="balanced">Balanced</button>
+          <button class="lad" data-l="quality">Quality</button>
+          <button class="lad" data-l="max">Max</button>
+          <button class="q" id="q-ladder" type="button" aria-label="What is quality ladder?">?</button>
+        </div>
+        <div class="prompt">
+          <textarea id="prompt" placeholder="a still from the game…"></textarea>
+          <div class="prompt-row">
+            <span class="meta">1024 · seed lock <button class="q" id="q-seed" type="button">?</button></span>
+            <button class="make" id="make" type="button">Make</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen-jobs" class="screen">
+        <p class="kicker">Jobs</p>
+        <div id="job-list" class="job-list"></div>
+      </div>
+
+      <div id="screen-more" class="screen">
+        <p class="kicker">Resources</p>
+        <pre class="mono" id="res-json">—</pre>
+        <button class="ghost" id="recal" type="button">Recalibrate</button>
+        <p class="faint">Chat, Audio, Talk, Library, Train: Phase 1+. This is Phase 0 — engine, pair, status, jobs.</p>
+      </div>
+    </section>
+
+    <div class="help" id="help">
+      <h4 id="help-title"></h4>
+      <p id="help-body"></p>
+      <div class="row">
+        <button type="button" id="help-hide">Don’t show this one</button>
+        <button type="button" id="help-ok">Got it</button>
+      </div>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
