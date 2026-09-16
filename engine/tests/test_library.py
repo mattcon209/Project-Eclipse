@@ -517,3 +517,61 @@ def test_box72_gameai_comfy_qwen_and_skips_hf_bin(tmp_path):
     assert rec["modality"] == "image"
     assert rec["managed"] is False
     assert not any((r.get("path") or "").endswith("pytorch_model.bin") for r in out["items"])
+
+
+def test_box73_scan_drops_missing_and_inbox_bin(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    d = home / "Downloads"
+    d.mkdir(parents=True)
+    keep = _gguf(d / "keep.gguf")
+    gone = d / "deleted.gguf"
+    _gguf(gone)
+    junk = d / "pytorch_model.bin"
+    junk.write_bytes(b"not a model" * 1000)
+    lib = _lib(tmp_path)
+    rec_keep = lib.add(
+        {
+            "name": "keep",
+            "path": str(keep.resolve()),
+            "state": "ready",
+            "format": "gguf",
+            "modality": "text",
+            "handler": "text",
+            "managed": False,
+            "source_kind": "scan",
+        }
+    )
+    rec_gone = lib.add(
+        {
+            "name": "deleted",
+            "path": str(gone.resolve()),
+            "state": "ready",
+            "format": "gguf",
+            "modality": "text",
+            "handler": "text",
+            "managed": False,
+            "source_kind": "scan",
+        }
+    )
+    rec_bin = lib.add(
+        {
+            "name": "pytorch_model",
+            "path": str(junk.resolve()),
+            "state": "inbox",
+            "format": "bin",
+            "modality": "unknown",
+            "handler": "inbox",
+            "managed": False,
+            "source_kind": "scan",
+        }
+    )
+    gone.unlink()
+    out = scan_machine(lib=lib, home=home)
+    ids = {it["id"] for it in out["items"]}
+    assert rec_keep["id"] in ids
+    assert rec_gone["id"] not in ids
+    assert rec_bin["id"] not in ids
+    assert out["removed"] >= 2
+    assert all(it.get("format") != "bin" for it in out["items"])

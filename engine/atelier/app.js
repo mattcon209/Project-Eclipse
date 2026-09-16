@@ -443,9 +443,10 @@ async function searchThisPc() {
     const n = r.added || 0;
     const ready = r.ready || 0;
     const found = r.found || 0;
+    const removed = r.removed || 0;
     const roots = (r.roots || []).length;
-    if (found || ready) {
-      err.textContent = `Found ${found} · added ${n} · ${ready} Ready. Looked in ${roots} folder(s). Files stayed on the PC.`;
+    if (found || ready || removed) {
+      err.textContent = `Found ${found} · added ${n} · ${ready} Ready · removed ${removed} stale. Looked in ${roots} folder(s). Files stayed on the PC.`;
     } else {
       err.textContent = `Looked in ${roots} folder(s), found 0. Ollama blobs and LM Studio paths are included. If they’re on another drive, set ECLIPSE_SCAN_ROOTS.`;
     }

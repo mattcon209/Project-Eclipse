@@ -428,6 +428,42 @@ def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = N
     return added, new, dup
 
 
+def prune_stale(lib: Library) -> list[dict[str, Any]]:
+    """Drop catalog rows whose files are gone, or scan noise we no longer list."""
+    dropped: list[dict[str, Any]] = []
+    for rec in list(lib.items()):
+        if not _stale(rec):
+            continue
+        gone = lib.remove(rec["id"])
+        if gone:
+            dropped.append(gone)
+    return dropped
+
+
+def _stale(rec: dict[str, Any]) -> bool:
+    raw = rec.get("path") or ""
+    if not raw:
+        return True
+    p = Path(raw)
+    try:
+        exists = p.exists()
+    except OSError:
+        exists = False
+    if not exists:
+        return True
+    if rec.get("state") == "ready" or rec.get("managed"):
+        return False
+    suf = p.suffix.lower() if p.is_file() else ""
+    if rec.get("state") == "inbox" and suf and suf not in WEIGHT_SUFFIXES:
+        if _looks_gguf(p):
+            return False
+        return True
+    name = (p.name or rec.get("name") or "").lower()
+    if rec.get("state") == "inbox" and any(h in name for h in SKIP_WEIGHT_HINTS):
+        return True
+    return False
+
+
 def scan_folder(path: str | Path, lib: Library | None = None) -> list[dict[str, Any]]:
     lib = lib or LIB
     root = Path(path).expanduser()
@@ -474,10 +510,12 @@ def scan_machine(
             seen.add(key)
             found.append(cand)
     items, new, dup = ingest(found, lib, names)
-    ready = sum(1 for it in items if it.get("state") == "ready")
+    dropped = prune_stale(lib)
+    catalog = lib.items()
+    ready = sum(1 for it in catalog if it.get("state") == "ready")
     append_log(
         job["id"],
-        f"Found {len(found)} · added {new} · already listed {dup} · {ready} Ready.",
+        f"Found {len(found)} · added {new} · already listed {dup} · {ready} Ready · removed {len(dropped)} stale.",
         state="done",
         progress=100,
     )
@@ -489,5 +527,6 @@ def scan_machine(
         "added": new,
         "already": dup,
         "ready": ready,
-        "items": items,
+        "removed": len(dropped),
+        "items": catalog,
     }
