@@ -37,6 +37,8 @@ def setup_function(_fn):
     sess["loaded_name"] = None
     sess["mode"] = None
     sess["by_mode"] = {}
+    sess["seed"] = 441029
+    sess["seed_random"] = False
     session_store.write(sess)
 
 
@@ -169,6 +171,37 @@ def test_box83_stack_resolves_companions(tmp_path, monkeypatch):
     assert stack["unet_name"] == unet.name
     assert stack["vae_name"] == vae.name
     assert stack["clip_name"] == clip.name
+
+
+def test_box85_checkpoint_does_not_need_vae(tmp_path, monkeypatch):
+    from eclipse.image_runtime import _workflow
+
+    rec = {
+        "name": "Qwen-Edit-abliterated-checkpoint_v1.2",
+        "path": str(tmp_path / "models" / "checkpoints" / "Qwen-Edit-abliterated-checkpoint_v1.2.safetensors"),
+        "handler": "t2i",
+        "modality": "image",
+    }
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: [])
+    stack = resolve_stack(rec)
+    assert stack["kind"] == "checkpoint"
+    graph = _workflow(stack, "hallway", {"steps": 20, "cfg": 2.5, "width": 768, "height": 768}, 7, "j1")
+    assert graph["4"]["class_type"] == "CheckpointLoaderSimple"
+    assert "VAELoader" not in {n["class_type"] for n in graph.values()}
+
+
+def test_box86_seed_random_rolls(monkeypatch):
+    from eclipse.orchestrator import set_seed, session
+
+    set_seed(441029, random=False)
+    assert session()["seed"] == 441029
+    assert session()["seed_random"] is False
+    set_seed(random=True)
+    assert session()["seed_random"] is True
+    monkeypatch.setattr("eclipse.orchestrator.secrets.randbelow", lambda n: 99)
+    OS.reset()
+    job = make_image("x")
+    assert job.get("payload", {}).get("seed") == 99 or session()["seed"] == 99
 
 
 def test_box84_non_png_is_refused():

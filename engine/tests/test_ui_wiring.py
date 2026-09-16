@@ -67,6 +67,7 @@ def test_box57_js_api_paths_exist_on_gateway():
         ("/api/jobs", "get"),
         ("/api/calibrate", "post"),
         ("/api/ladder", "post"),
+        ("/api/seed", "post"),
         ("/api/mode", "post"),
         ("/api/library", "get"),
         ("/api/chats", "get"),
@@ -124,6 +125,9 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert "showStill" in JS
     assert 'id="still"' in HTML
     assert 'handler === "t2i"' in JS or "handler === 't2i'" in JS
+    assert 'id="seed"' in HTML
+    assert 'id="seed-random"' in HTML
+    assert "/api/seed" in JS
     css = (ROOT / "atelier" / "atelier.css").read_text(encoding="utf-8")
     assert "100dvh" in css
     assert ".chat-log" in css

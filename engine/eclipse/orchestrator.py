@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import time
 from typing import Any
 
@@ -29,6 +30,7 @@ _state = JsonStore(
         "loras": [],
         "ladder": "balanced",
         "seed_lock": True,
+        "seed_random": False,
         "seed": 441029,
         "view": "home",
         "by_mode": {},
@@ -93,6 +95,20 @@ def set_ladder(ladder: str) -> dict[str, Any]:
         raise ValueError("Unknown ladder")
     data = _state.read()
     data["ladder"] = ladder
+    _state.write(data)
+    return session()
+
+
+def set_seed(seed: int | None = None, random: bool | None = None) -> dict[str, Any]:
+    data = _state.read()
+    if random is not None:
+        data["seed_random"] = bool(random)
+        data["seed_lock"] = not bool(random)
+    if seed is not None:
+        data["seed"] = int(seed) % (2**32)
+        if random is None:
+            data["seed_random"] = False
+            data["seed_lock"] = True
     _state.write(data)
     return session()
 
@@ -163,7 +179,13 @@ def make_image(prompt: str) -> dict[str, Any]:
         set_mode("image")
         data = session()
     rec = get_item(data.get("loaded")) if data.get("loaded") else None
-    seed = int(data.get("seed") or 441029)
+    if data.get("seed_random"):
+        seed = secrets.randbelow(2**32)
+        sess = _state.read()
+        sess["seed"] = seed
+        _state.write(sess)
+    else:
+        seed = int(data.get("seed") or 441029)
     ladder = data.get("ladder") or "balanced"
     job = create_job(
         "image",
@@ -193,10 +215,6 @@ def make_image(prompt: str) -> dict[str, Any]:
             append_log(job["id"], "No image model loaded. Nothing was faked.", state="blocked")
         return get_job_safe(job["id"])
     append_log(job["id"], "first_byte", state="running", progress=1)
-    if not data.get("seed_lock"):
-        sess = _state.read()
-        sess["seed"] = (seed + 1) % (2**32)
-        _state.write(sess)
     args = (job["id"], rec, prompt, ladder, seed)
     if IMAGE._stub is not None:
         _run_image(*args)

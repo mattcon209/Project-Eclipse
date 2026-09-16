@@ -233,6 +233,8 @@ def _guess_from_name(blob: str) -> dict[str, Any] | None:
     image_needles = (
         "qwen-image",
         "qwenimage",
+        "qwen-edit",
+        "qwenedit",
         "flux",
         "sdxl",
         "stable-diffusion",

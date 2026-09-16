@@ -97,30 +97,129 @@ IMAGE = ImageEngine()
 def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
     unet_path = Path(rec.get("path") or rec.get("source") or "")
     unet_name = unet_path.name if unet_path.name else str(rec.get("name") or "")
+    kind = _kind(rec, unet_path)
+    if kind == "companion" or rec.get("handler") in {"vae", "clip", "lora"}:
+        raise ImageError("Pick the diffusion model in Image, not a VAE / CLIP / LoRA.")
+    dtype = "fp8_e4m3fn" if "fp8" in unet_name.lower() else "default"
+    stack = {
+        "unet_name": unet_name,
+        "vae_name": "",
+        "clip_name": "",
+        "dtype": dtype,
+        "kind": kind,
+        "clip_type": _clip_type(unet_name),
+        "latent": "EmptySD3LatentImage" if _qwenish(unet_name) else "EmptyLatentImage",
+    }
+    if kind == "checkpoint":
+        return stack
     items = list_items()
-    vae_name = _pick_name(items, "vae") or _beside(unet_path, "vae", ("qwen_image_vae.safetensors",))
-    clip_name = _pick_name(items, "clip") or _beside(
+    prefer_vae = ("qwen_image_vae",) if _qwenish(unet_name) else ()
+    prefer_clip = ("qwen_2.5_vl", "qwen2.5-vl") if _qwenish(unet_name) else ()
+    vae_name = _pick_name(items, "vae", prefer=prefer_vae, skip=unet_path) or _beside(
+        unet_path, "vae", ("qwen_image_vae.safetensors",)
+    )
+    clip_name = _pick_name(items, "clip", prefer=prefer_clip, skip=unet_path) or _beside(
         unet_path,
         "text_encoders",
         ("qwen_2.5_vl_7b_fp8_scaled.safetensors", "qwen_2.5_vl_7b.safetensors"),
     )
     if not vae_name or not clip_name:
+        missing = []
+        if not vae_name:
+            missing.append("VAE (models/vae)")
+        if not clip_name:
+            missing.append("CLIP / text encoder (models/text_encoders)")
         raise ImageError(
-            "Qwen Image needs the UNET plus VAE and CLIP on disk "
-            "(models/vae/qwen_image_vae.safetensors and models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors). "
-            "Search this PC again."
+            "This UNET needs " + " and ".join(missing) + " on disk. "
+            "Search this PC again. AIO checkpoints in models/checkpoints do not need companions. "
+            "Nothing was faked."
         )
-    dtype = "fp8_e4m3fn" if "fp8" in unet_name.lower() else "default"
-    return {"unet_name": unet_name, "vae_name": vae_name, "clip_name": clip_name, "dtype": dtype}
+    stack["vae_name"] = vae_name
+    stack["clip_name"] = clip_name
+    return stack
 
 
-def _pick_name(items: list[dict[str, Any]], handler: str) -> str | None:
+def _qwenish(name: str) -> bool:
+    n = (name or "").lower().replace("_", "-")
+    return "qwen-image" in n or "qwen-edit" in n or "qwenimage" in n or "qwenedit" in n
+
+
+def _clip_type(name: str) -> str:
+    n = (name or "").lower().replace("_", "-")
+    if "qwen" in n:
+        return "qwen_image"
+    if "flux" in n:
+        return "flux"
+    if "sd3" in n or "sd-3" in n:
+        return "sd3"
+    if "hidream" in n:
+        return "hidream"
+    return "stable_diffusion"
+
+
+def _kind(rec: dict[str, Any], path: Path) -> str:
+    parts = [p.lower() for p in path.parts]
+    blob = (str(path) + " " + str(rec.get("name") or "")).lower().replace("_", "-")
+    if any(p in parts for p in ("vae", "text_encoders", "text-encoders", "clip", "loras", "lora")):
+        return "companion"
+    if "diffusion_models" in parts or "unet" in parts:
+        return "unet"
+    if "checkpoints" in parts or "checkpoint" in blob:
+        return "checkpoint"
+    if _qwenish(blob) and "vae" not in blob:
+        return "unet"
+    return "checkpoint"
+
+
+def _looks_handler(it: dict[str, Any], handler: str) -> bool:
+    if it.get("handler") == handler or it.get("modality") == handler:
+        return True
+    blob = (str(it.get("path") or "") + " " + str(it.get("name") or "")).lower().replace("_", "-")
+    if handler == "vae":
+        return any(x in blob for x in ("/vae/", "\\vae\\", "/models/vae", "-vae.", "/vae\\"))
+    if handler == "clip":
+        return any(
+            x in blob
+            for x in (
+                "text-encoder",
+                "text_encoder",
+                "/clip/",
+                "\\clip\\",
+                "qwen-2.5-vl",
+                "qwen2.5-vl",
+            )
+        )
+    return False
+
+
+def _pick_name(
+    items: list[dict[str, Any]],
+    handler: str,
+    *,
+    prefer: tuple[str, ...] = (),
+    skip: Path | None = None,
+) -> str | None:
+    ranked: list[tuple[int, str]] = []
+    skip_s = str(skip) if skip else ""
     for it in items:
-        if it.get("state") == "ready" and it.get("handler") == handler:
-            p = Path(it.get("path") or "")
-            if p.name:
-                return p.name
-    return None
+        if it.get("state") != "ready":
+            continue
+        if not _looks_handler(it, handler):
+            continue
+        p = Path(it.get("path") or "")
+        if not p.name:
+            continue
+        if skip_s and str(p) == skip_s:
+            continue
+        low = p.name.lower()
+        score = 0
+        for i, needle in enumerate(prefer):
+            if needle.lower() in low:
+                score = 100 - i
+                break
+        ranked.append((score, p.name))
+    ranked.sort(key=lambda x: (-x[0], x[1]))
+    return ranked[0][1] if ranked else None
 
 
 def _beside(unet: Path, folder: str, names: tuple[str, ...]) -> str | None:
@@ -186,32 +285,55 @@ def _comfy_run(
 
 
 def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: int, job_id: str) -> dict[str, Any]:
-    unet = stack["unet_name"]
-    latent = "EmptySD3LatentImage" if "edit" in unet.lower() else "EmptyLatentImage"
-    return {
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": int(seed) % (2**32),
-                "steps": int(opts["steps"]),
-                "cfg": float(opts["cfg"]),
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["5", 0],
-            },
+    latent = stack.get("latent") or (
+        "EmptySD3LatentImage" if "edit" in (stack.get("unet_name") or "").lower() else "EmptyLatentImage"
+    )
+    sampler = {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": int(seed) % (2**32),
+            "steps": int(opts["steps"]),
+            "cfg": float(opts["cfg"]),
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "denoise": 1.0,
+            "model": ["4", 0],
+            "positive": ["6", 0],
+            "negative": ["7", 0],
+            "latent_image": ["5", 0],
         },
-        "4": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": stack["dtype"]}},
-        "5": {"class_type": latent, "inputs": {"width": int(opts["width"]), "height": int(opts["height"]), "batch_size": 1}},
+    }
+    save = {"class_type": "SaveImage", "inputs": {"filename_prefix": "eclipse-" + job_id, "images": ["10", 0]}}
+    empty = {
+        "class_type": latent,
+        "inputs": {"width": int(opts["width"]), "height": int(opts["height"]), "batch_size": 1},
+    }
+    if stack.get("kind") == "checkpoint":
+        return {
+            "3": sampler,
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": stack["unet_name"]}},
+            "5": empty,
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["4", 1]}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+            "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+            "11": save,
+        }
+    return {
+        "3": sampler,
+        "4": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": stack["unet_name"], "weight_dtype": stack.get("dtype") or "default"},
+        },
+        "5": empty,
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["8", 0]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["8", 0]}},
-        "8": {"class_type": "CLIPLoader", "inputs": {"clip_name": stack["clip_name"], "type": "qwen_image"}},
+        "8": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": stack["clip_name"], "type": stack.get("clip_type") or "qwen_image"},
+        },
         "9": {"class_type": "VAELoader", "inputs": {"vae_name": stack["vae_name"]}},
         "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
-        "11": {"class_type": "SaveImage", "inputs": {"filename_prefix": "eclipse-" + job_id, "images": ["10", 0]}},
+        "11": save,
     }
 
 

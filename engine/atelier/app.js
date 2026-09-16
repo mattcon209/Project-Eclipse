@@ -9,7 +9,7 @@ const helpCopy = {
   },
   seed: {
     title: "Seed",
-    body: "A seed is the roll of the dice. Same prompt + same seed = the same picture. Seed lock holds it so you can change one word and keep the hallway.",
+    body: "A seed is the roll of the dice. Same prompt + same seed = the same picture. Type a number to hold it. Random rolls a new one every Make and writes it back so you can reuse it.",
   },
   paste: {
     title: "Paste a link",
@@ -117,7 +117,15 @@ function applyStatus(s) {
   const lad = s.session?.ladder || "balanced";
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
   const loaded = s.session?.loaded_name || "—";
-  $("#filmstock").textContent = `${loaded} · — · seed ${s.session?.seed ?? "—"} · ${lad}`;
+  const short = loaded.length > 18 ? loaded.slice(0, 16) + "…" : loaded;
+  $("#filmstock").textContent = `${short} · seed ${s.session?.seed ?? "—"} · ${lad}`;
+  const seedInp = $("#seed");
+  const seedRnd = $("#seed-random");
+  if (seedInp && document.activeElement !== seedInp && s.session?.seed != null) seedInp.value = s.session.seed;
+  if (seedRnd) {
+    seedRnd.checked = !!s.session?.seed_random;
+    if (seedInp) seedInp.disabled = seedRnd.checked;
+  }
   syncPicks();
 }
 
@@ -224,7 +232,14 @@ function fillPicks() {
   }
   const img = $("#image-model");
   if (img) {
-    const pics = ready.filter((i) => i.handler === "t2i");
+    const pics = ready.filter((i) => {
+      if (i.handler === "vae" || i.handler === "clip" || i.handler === "lora") return false;
+      if (i.modality === "vae" || i.modality === "clip" || i.modality === "lora" || i.modality === "text") return false;
+      const n = ((i.name || "") + " " + (i.path || "")).toLowerCase().replace(/_/g, "-");
+      if (n.includes("/vae/") || n.includes("\\vae\\") || n.includes("-vae.") || n.includes("/models/vae")) return false;
+      if (n.includes("text-encoder") || n.includes("/clip/") || n.includes("qwen-2.5-vl") || n.includes("qwen2.5-vl")) return false;
+      return i.handler === "t2i" || i.modality === "image" || i.modality === "video";
+    });
     const cur = (by.image && by.image.id) || (mode === "image" ? loaded : "") || img.value;
     img.innerHTML = '<option value="">image model…</option>' + pics.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`).join("");
     if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;
@@ -281,6 +296,36 @@ document.querySelectorAll(".lad").forEach((b) => {
     document.querySelectorAll(".lad").forEach((x) => x.classList.toggle("on", x === b));
   });
 });
+
+async function pushSeed(partial) {
+  const inp = $("#seed");
+  const rnd = $("#seed-random");
+  const body = Object.assign({}, partial || {});
+  if (body.seed == null && inp && inp.value !== "") body.seed = Number(inp.value);
+  if (body.random == null && rnd) body.random = !!rnd.checked;
+  try {
+    const sess = await api("/api/seed", { method: "POST", body: JSON.stringify(body) });
+    if (lastStatus) lastStatus.session = sess;
+    if (inp && sess.seed != null && document.activeElement !== inp) inp.value = sess.seed;
+    if (rnd) rnd.checked = !!sess.seed_random;
+    if (inp) inp.disabled = !!(rnd && rnd.checked);
+  } catch (_) {}
+}
+
+if ($("#seed")) {
+  $("#seed").addEventListener("change", () => {
+    const n = Number($("#seed").value);
+    if (!Number.isFinite(n)) return;
+    pushSeed({ seed: n, random: false });
+  });
+}
+if ($("#seed-random")) {
+  $("#seed-random").addEventListener("change", () => {
+    const on = !!$("#seed-random").checked;
+    if ($("#seed")) $("#seed").disabled = on;
+    pushSeed({ random: on });
+  });
+}
 
 $("#make").addEventListener("click", async () => {
   const err = $("#image-err");

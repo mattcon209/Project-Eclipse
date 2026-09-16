@@ -28,7 +28,7 @@ from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
 from eclipse.image_runtime import IMAGE
-from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, use_model
+from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, set_seed, use_model
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -74,6 +74,11 @@ class ModeIn(BaseModel):
 
 class LadderIn(BaseModel):
     ladder: str
+
+
+class SeedIn(BaseModel):
+    seed: int | None = None
+    random: bool | None = None
 
 
 class MakeIn(BaseModel):
@@ -241,6 +246,12 @@ def ladder(body: LadderIn, authorization: str | None = Header(default=None)) -> 
         return set_ladder(body.ladder)
     except ValueError:
         raise HTTPException(400, "Unknown ladder.") from None
+
+
+@app.post("/api/seed")
+def seed(body: SeedIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return set_seed(body.seed, body.random)
 
 
 @app.post("/api/make")

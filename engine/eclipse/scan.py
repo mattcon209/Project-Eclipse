@@ -387,6 +387,18 @@ def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = N
             continue
         existing = lib.by_path(str(resolved))
         if existing:
+            info = sniff(resolved)
+            if info.get("known"):
+                existing["modality"] = info["modality"]
+                existing["handler"] = info["handler"]
+                existing["format"] = info.get("format") or existing.get("format")
+                existing["notes"] = (info.get("notes") or "On disk.") + " · left on disk, not copied."
+                if existing.get("state") != "ready":
+                    existing["state"] = "ready"
+                    existing["vram_balanced_mb"] = guess_vram_mb(
+                        info["modality"], int(existing.get("bytes") or 0)
+                    )
+                existing = lib.save(existing)
             added.append(existing)
             dup += 1
             continue

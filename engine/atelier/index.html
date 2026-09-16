@@ -73,7 +73,7 @@
         <div class="canvas">
           <div class="empty-frame" id="canvas-empty">
             <span>No still yet</span>
-            <small>Pick the Qwen Image UNET, then Make. Prompt is sent unchanged.</small>
+            <small>Pick an image model, then Make. Prompt is sent unchanged.</small>
           </div>
           <img id="still" class="still hidden" alt="" />
           <div class="filmstock" id="filmstock">— · — · seed — · balanced</div>
@@ -87,12 +87,22 @@
         </div>
         <div class="prompt">
           <textarea id="prompt" placeholder="a still from the game…"></textarea>
+          <div class="prompt-row seed-row">
+            <label class="seed-field">
+              <span>seed</span>
+              <input id="seed" type="number" min="0" max="4294967295" step="1" value="441029" aria-label="Seed" />
+            </label>
+            <label class="chk" for="seed-random">
+              <input id="seed-random" type="checkbox" />
+              random
+            </label>
+            <button class="q" id="q-seed" type="button" aria-label="What is a seed?">?</button>
+          </div>
           <div class="prompt-row">
             <span class="meta grow">
               <select id="image-model" class="pick" aria-label="Image model">
                 <option value="">image model…</option>
               </select>
-              <button class="q" id="q-seed" type="button" aria-label="What is a seed?">?</button>
             </span>
             <button class="make" id="make" type="button">Make</button>
           </div>
@@ -178,6 +188,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=10"></script>
+  <script src="/app.js?v=11"></script>
 </body>
 </html>
