@@ -29,7 +29,7 @@ SKIP_DIR_NAMES = {
     "OneDrive",  # scanned via explicit Downloads/Desktop roots
 }
 
-WEIGHT_SUFFIXES = {".gguf", ".ggml", ".safetensors", ".ckpt", ".pt", ".pth", ".bin"}
+WEIGHT_SUFFIXES = {".gguf", ".ggml", ".safetensors", ".ckpt"}
 SKIP_WEIGHT_HINTS = ("tokenizer", "vocab", "merges", "spiece", "sentencepiece")
 
 
@@ -68,6 +68,15 @@ def default_roots(home: Path | None = None) -> list[Path]:
         home / "Documents" / "LM Studio" / "models",
         home / "OneDrive" / "Documents" / "LM Studio" / "models",
         home / "models",
+        home / "GameAI",
+        home / "GameAI" / "ComfyUI",
+        home / "GameAI" / "ComfyUI" / "models",
+        home / "GameAI" / "ComfyUI" / "models" / "diffusion_models",
+        home / "GameAI" / "ComfyUI" / "models" / "checkpoints",
+        home / "GameAI" / "ComfyUI" / "models" / "unet",
+        home / "GameAI" / "ComfyUI" / "models" / "vae",
+        home / "GameAI" / "ComfyUI" / "models" / "text_encoders",
+        home / "GameAI" / "ComfyUI" / "models" / "loras",
         home / "ComfyUI",
         home / "ComfyUI" / "models",
         home / "ComfyUI" / "models" / "checkpoints",

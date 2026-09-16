@@ -494,3 +494,26 @@ def test_box71_comfy_extra_model_paths_yaml(tmp_path):
     assert rec["state"] == "ready"
     assert rec["modality"] == "image"
     assert rec["managed"] is False
+
+
+def test_box72_gameai_comfy_qwen_and_skips_hf_bin(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    unet = home / "GameAI" / "ComfyUI" / "models" / "diffusion_models"
+    unet.mkdir(parents=True)
+    _fat_safetensors(unet / "qwen_image_edit_2509_fp8_e4m3fn.safetensors")
+    junk = home / ".cache" / "huggingface" / "hub" / "models--org--foo" / "snapshots" / "abc"
+    junk.mkdir(parents=True)
+    (junk / "pytorch_model.bin").write_bytes(b"not a model" * 1000)
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    rec = next(
+        r
+        for r in out["items"]
+        if "qwen" in (r.get("name") or "").lower() or "qwen" in (r.get("source") or "").lower()
+    )
+    assert rec["state"] == "ready"
+    assert rec["modality"] == "image"
+    assert rec["managed"] is False
+    assert not any((r.get("path") or "").endswith("pytorch_model.bin") for r in out["items"])
