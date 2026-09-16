@@ -15,6 +15,10 @@ IMAGE_CLASSES = (
     "StableDiffusionXLInpaintPipeline",
     "FluxPipeline",
     "AutoPipelineForText2Image",
+    "QwenImagePipeline",
+    "KolorsPipeline",
+    "StableDiffusion3Pipeline",
+    "HiDreamImagePipeline",
 )
 VIDEO_CLASSES = (
     "TextToVideoSDPipeline",
@@ -69,6 +73,10 @@ def _sniff_dir(root: Path) -> dict[str, Any]:
         return _sniff_config(cfg, display=root.name)
     if len(st) == 1:
         return _sniff_file(st[0], display=root.name)
+    guessed = _guess_from_name(str(root))
+    if guessed and (st or any(p.suffix.lower() in {".ckpt", ".pt", ".bin", ".gguf"} for p in files)):
+        fmt = "safetensors" if st else "weights"
+        return guessed | {"format": fmt, "name": root.name, "known": True}
     if st:
         return {
             "format": "safetensors",
@@ -84,6 +92,9 @@ def _sniff_dir(root: Path) -> dict[str, Any]:
 def _sniff_file(path: Path, display: str) -> dict[str, Any]:
     suf = path.suffix.lower()
     if suf in {".gguf", ".ggml"} or _is_gguf(path):
+        guessed = _guess_from_name(str(path) + " " + display)
+        if guessed:
+            return guessed | {"format": "gguf", "name": display, "known": True}
         return {
             "format": "gguf",
             "modality": "text",
@@ -105,6 +116,9 @@ def _sniff_file(path: Path, display: str) -> dict[str, Any]:
                 "notes": "LoRA adapter.",
                 "known": True,
             }
+        guessed = _guess_from_name(str(path) + " " + display)
+        if guessed:
+            return guessed | {"format": "safetensors", "name": display, "known": True}
         return {
             "format": "safetensors",
             "modality": "unknown",
@@ -115,6 +129,18 @@ def _sniff_file(path: Path, display: str) -> dict[str, Any]:
         }
     if path.name == "config.json":
         return _sniff_config(path, display)
+    if suf in {".ckpt", ".pt", ".pth", ".bin"}:
+        guessed = _guess_from_name(str(path) + " " + display)
+        if guessed:
+            return guessed | {"format": suf.lstrip("."), "name": display, "known": True}
+        return {
+            "format": suf.lstrip("."),
+            "modality": "unknown",
+            "handler": "inbox",
+            "name": display,
+            "notes": "Weight file — Inbox until identified.",
+            "known": False,
+        }
     if suf in {".onnx"}:
         return {
             "format": "onnx",
@@ -142,7 +168,7 @@ def _sniff_model_index(path: Path, display: str) -> dict[str, Any]:
             "notes": cls or "Diffusers video.",
             "known": True,
         }
-    if any(v in cls for v in IMAGE_CLASSES) or "Diffusion" in cls or "Flux" in cls:
+    if any(v in cls for v in IMAGE_CLASSES) or "Diffusion" in cls or "Flux" in cls or "QwenImage" in cls or "Kolors" in cls:
         return {
             "format": "diffusers",
             "modality": "image",
@@ -178,6 +204,9 @@ def _sniff_config(path: Path, display: str) -> dict[str, Any]:
             "notes": "Speech-to-text.",
             "known": True,
         }
+    guessed = _guess_from_name(display + " " + str(path))
+    if guessed and guessed.get("modality") != "text":
+        return guessed | {"format": "transformers", "name": display, "known": True}
     if mt or arch:
         return {
             "format": "transformers",
@@ -187,7 +216,47 @@ def _sniff_config(path: Path, display: str) -> dict[str, Any]:
             "notes": mt or arch,
             "known": True,
         }
+    if guessed:
+        return guessed | {"format": "transformers", "name": display, "known": True}
     return _unknown(path, "config.json has no model_type.")
+
+
+def _guess_from_name(blob: str) -> dict[str, Any] | None:
+    """Filename / path hints. Never a silent Ready for unknown families."""
+    n = blob.lower().replace(" ", "-").replace("_", "-")
+    image_needles = (
+        "qwen-image",
+        "qwenimage",
+        "flux",
+        "sdxl",
+        "stable-diffusion",
+        "sd-1.5",
+        "sd15",
+        "sd1.5",
+        "sd3",
+        "hidream",
+        "kolors",
+        "auraflow",
+        "pixart",
+        "pony-diffusion",
+        "/unet/",
+        "/diffusion-models/",
+        "/diffusion_models/",
+        "/checkpoints/",
+        "\\checkpoints\\",
+        "/models/stable-diffusion",
+    )
+    if any(x in n for x in image_needles):
+        if "lora" in n:
+            return None
+        return {"modality": "image", "handler": "t2i", "notes": "Image weights (name/path)."}
+    if any(x in n for x in ("ltxv", "cogvideo", "hunyuan-video", "wan2.1", "wan-2", "text-to-video", "mochi-1")):
+        return {"modality": "video", "handler": "t2v", "notes": "Video weights (name/path)."}
+    if any(x in n for x in ("whisper", "parakeet", "fish-speech", "f5-tts", "kokoro", "xtts", "openvoice", "sensevoice")):
+        return {"modality": "speech", "handler": "stt", "notes": "Speech weights (name/path)."}
+    if any(x in n for x in ("musicgen", "stable-audio", "audiogen")):
+        return {"modality": "audio", "handler": "t2a", "notes": "Audio weights (name/path)."}
+    return None
 
 
 def _is_gguf(path: Path) -> bool:

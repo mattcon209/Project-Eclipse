@@ -87,7 +87,12 @@
         <div class="prompt">
           <textarea id="prompt" placeholder="a still from the game…"></textarea>
           <div class="prompt-row">
-            <span class="meta">1024 · seed lock <button class="q" id="q-seed" type="button">?</button></span>
+            <span class="meta grow">
+              <select id="image-model" class="pick" aria-label="Image model">
+                <option value="">image model…</option>
+              </select>
+              <button class="q" id="q-seed" type="button" aria-label="What is a seed?">?</button>
+            </span>
             <button class="make" id="make" type="button">Make</button>
           </div>
           <p class="err" id="image-err"></p>
@@ -96,7 +101,17 @@
 
       <div id="screen-chat" class="screen">
         <div class="chat-head">
-          <p class="kicker" id="chat-title">Chat</p>
+          <select id="task-mode" class="pick" aria-label="Mode">
+            <option value="chat">Chat</option>
+            <option value="image">Image</option>
+            <option value="audio">Audio</option>
+            <option value="video">Video</option>
+            <option value="talk">Talk</option>
+          </select>
+          <select id="chat-model" class="pick" aria-label="Chat model">
+            <option value="">text model…</option>
+          </select>
+          <button class="q" id="q-model" type="button" aria-label="What is the model list?">?</button>
           <div class="chat-tools">
             <input id="chat-find" placeholder="search" autocomplete="off" />
             <button class="ghost" id="chat-new" type="button">New</button>
@@ -106,8 +121,12 @@
         <div id="chat-log" class="chat-log">
           <div class="empty-frame" id="chat-empty">
             <span>No thread yet</span>
-            <small>Use a Ready text model in Library, then Send.</small>
+            <small>Pick a text model here, or Use one in Library, then Send.</small>
           </div>
+        </div>
+        <div id="later-empty" class="empty-frame hidden">
+          <span id="later-title">Later</span>
+          <small id="later-body">This handler is a later phase. Nothing was faked.</small>
         </div>
         <div class="prompt">
           <textarea id="chat-input" placeholder="a line of dialogue…"></textarea>
@@ -158,6 +177,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=7"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

@@ -23,11 +23,23 @@ const helpCopy = {
     title: "Persona",
     body: "A short system note that stays on every turn in this thread — a writer’s register, not a content filter. Hollow writer is for game copy. None is the raw model.",
   },
+  model: {
+    title: "Model on this tab",
+    body: "Sorted by what the tab does. Chat remembers the last text model; Image remembers the last picture model. Switching Qwen3 Chat → Image already has the T2I pick. Search this PC if a weight is on disk but missing here.",
+  },
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let hiddenHelp = JSON.parse(localStorage.getItem(HELP_KEY) || "{}");
 let lastStatus = null;
+let libItems = [];
+
+const LATER = {
+  audio: ["Audio", "Audio handler is Phase 4. Nothing was faked."],
+  video: ["Video", "Video handler is Phase 7. Nothing was faked."],
+  talk: ["Talk", "Talk handler is Phase 5. Nothing was faked."],
+  edit: ["Edit", "Edit handler is Phase 3. Nothing was faked."],
+};
 
 function clock() {
   const d = new Date();
@@ -106,8 +118,7 @@ function applyStatus(s) {
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
   const loaded = s.session?.loaded_name || "—";
   $("#filmstock").textContent = `${loaded} · — · seed ${s.session?.seed ?? "—"} · ${lad}`;
-  const ct = $("#chat-title");
-  if (ct) ct.textContent = s.session?.loaded_name || "Chat";
+  syncPicks();
 }
 
 async function boot() {
@@ -158,22 +169,111 @@ $("#pair-btn").addEventListener("click", async () => {
 });
 
 function go(m) {
-  document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+  const tab = m === "audio" || m === "video" || m === "talk" || m === "edit" ? "chat" : m;
+  document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === tab));
   ["home", "image", "chat", "library", "jobs"].forEach((id) => {
     const el = $("#screen-" + id);
-    if (el) el.classList.toggle("on", id === m);
+    if (el) el.classList.toggle("on", id === tab);
   });
   const gen = new Set(["image", "chat", "audio", "edit", "video", "talk", "train"]);
   if (gen.has(m)) {
-    api("/api/mode", { method: "POST", body: JSON.stringify({ mode: m }) }).catch(() => {});
+    api("/api/mode", { method: "POST", body: JSON.stringify({ mode: m }) }).then(async () => {
+      applyStatus(await api("/api/status"));
+    }).catch(() => {});
   }
   if (m === "jobs") refreshJobs();
   if (m === "library") refreshLibrary();
-  if (m === "chat") refreshChats();
+  if (tab === "chat") refreshChats();
+  applyTaskSurface(m);
+  fillPicks();
 }
 
 document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", () => go(b.dataset.m)));
 document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go)));
+
+function applyTaskSurface(m) {
+  const tm = $("#task-mode");
+  if (tm && (m === "chat" || m === "image" || LATER[m])) tm.value = m === "edit" ? "chat" : m;
+  const later = $("#later-empty");
+  const log = $("#chat-log");
+  const threads = $("#chat-threads");
+  const prompt = $("#screen-chat .prompt");
+  const live = m === "chat" || !LATER[m];
+  if (later) later.classList.toggle("hidden", live);
+  if (log) log.classList.toggle("hidden", !live);
+  if (threads) threads.classList.toggle("hidden", !live);
+  if (prompt) prompt.classList.toggle("hidden", !live);
+  if (!live && LATER[m]) {
+    const pair = LATER[m];
+    if ($("#later-title")) $("#later-title").textContent = pair[0];
+    if ($("#later-body")) $("#later-body").textContent = pair[1];
+  }
+}
+
+function fillPicks() {
+  const by = (lastStatus && lastStatus.session && lastStatus.session.by_mode) || {};
+  const loaded = (lastStatus && lastStatus.session && lastStatus.session.loaded) || "";
+  const mode = lastStatus && lastStatus.session && lastStatus.session.mode;
+  const ready = (libItems || []).filter((i) => i.state === "ready");
+  const chat = $("#chat-model");
+  if (chat) {
+    const text = ready.filter((i) => i.modality === "text");
+    const cur = (by.chat && by.chat.id) || (mode === "chat" ? loaded : "") || chat.value;
+    chat.innerHTML = '<option value="">text model…</option>' + text.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.ollama_name || i.name)}</option>`).join("");
+    if (cur && [...chat.options].some((o) => o.value === cur)) chat.value = cur;
+  }
+  const img = $("#image-model");
+  if (img) {
+    const pics = ready.filter((i) => i.modality === "image" || i.modality === "video");
+    const cur = (by.image && by.image.id) || (mode === "image" ? loaded : "") || img.value;
+    img.innerHTML = '<option value="">image model…</option>' + pics.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`).join("");
+    if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;
+  }
+}
+
+function syncPicks() {
+  const sess = lastStatus && lastStatus.session;
+  if (!sess) return;
+  const by = sess.by_mode || {};
+  const loaded = sess.loaded || "";
+  const chat = $("#chat-model");
+  if (chat && chat.options.length) {
+    const id = (by.chat && by.chat.id) || (sess.mode === "chat" ? loaded : "");
+    if (id && [...chat.options].some((o) => o.value === id)) chat.value = id;
+  }
+  const img = $("#image-model");
+  if (img && img.options.length) {
+    const id = (by.image && by.image.id) || (sess.mode === "image" ? loaded : "");
+    if (id && [...img.options].some((o) => o.value === id)) img.value = id;
+  }
+}
+
+async function pickUse(sel) {
+  const id = sel && sel.value;
+  if (!id) return;
+  const errChat = $("#chat-err");
+  const errImg = $("#image-err");
+  try {
+    const used = await api("/api/library/" + id + "/use", { method: "POST", body: "{}" });
+    applyStatus(await api("/api/status"));
+    const mod = used.record && used.record.modality;
+    if (mod === "image" || mod === "video") go("image");
+    if (mod === "text") go("chat");
+  } catch (e) {
+    const msg = e.message || "Use failed.";
+    if (errChat) errChat.textContent = msg;
+    if (errImg) errImg.textContent = msg;
+  }
+}
+
+if ($("#chat-model")) $("#chat-model").addEventListener("change", () => pickUse($("#chat-model")));
+if ($("#image-model")) $("#image-model").addEventListener("change", () => pickUse($("#image-model")));
+if ($("#task-mode")) {
+  $("#task-mode").addEventListener("change", () => {
+    const m = $("#task-mode").value;
+    go(m);
+  });
+}
 
 document.querySelectorAll(".lad").forEach((b) => {
   b.addEventListener("click", async () => {
@@ -281,7 +381,9 @@ $("#help-hide").addEventListener("click", () => {
 async function refreshLibrary() {
   try {
     const r = await api("/api/library");
-    renderLibrary(r.items || []);
+    libItems = r.items || [];
+    renderLibrary(libItems);
+    fillPicks();
   } catch (_) {}
 }
 
@@ -389,7 +491,12 @@ let currentThread = null;
 let chatBusy = false;
 
 function chatModelLabel() {
-  return (lastStatus && lastStatus.session && lastStatus.session.loaded_name) || "";
+  const sess = lastStatus && lastStatus.session;
+  if (!sess) return "";
+  const by = (sess.by_mode && sess.by_mode.chat) || {};
+  if (by.name) return by.name;
+  if (sess.mode === "chat") return sess.loaded_name || "";
+  return sess.loaded_name || "";
 }
 
 function renderTurns(turns) {
@@ -593,6 +700,12 @@ $("#q-persona").addEventListener("click", (e) => {
   e.stopPropagation();
   openHelp("persona");
 });
+if ($("#q-model")) {
+  $("#q-model").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openHelp("model");
+  });
+}
 if ($("#chat-find")) {
   $("#chat-find").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

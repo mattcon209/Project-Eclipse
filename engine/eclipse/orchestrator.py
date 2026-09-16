@@ -28,6 +28,7 @@ _state = JsonStore(
         "seed_lock": True,
         "seed": 441029,
         "view": "home",
+        "by_mode": {},
     },
 )
 
@@ -38,6 +39,31 @@ def session() -> dict[str, Any]:
     return data
 
 
+def _stash_mode(data: dict[str, Any], mode: str | None) -> dict[str, Any]:
+    by = dict(data.get("by_mode") or {})
+    if mode and mode in GENERATION_MODES and data.get("loaded"):
+        by[mode] = {"id": data.get("loaded"), "name": data.get("loaded_name")}
+    data["by_mode"] = by
+    return by
+
+
+def _restore_mode(data: dict[str, Any], mode: str) -> None:
+    by = dict(data.get("by_mode") or {})
+    nxt = by.get(mode) or {}
+    rec = get_item(nxt["id"]) if nxt.get("id") else None
+    if rec and rec.get("state") == "ready":
+        data["loaded"] = rec["id"]
+        data["loaded_name"] = rec.get("ollama_name") or rec.get("name")
+        if rec.get("modality") == "text" and mode == "chat":
+            try:
+                ENGINE.load(rec)
+            except TextError:
+                pass
+    else:
+        data["loaded"] = None
+        data["loaded_name"] = None
+
+
 def set_mode(mode: str) -> dict[str, Any]:
     data = _state.read()
     if mode in VIEW_MODES or mode not in GENERATION_MODES:
@@ -46,13 +72,13 @@ def set_mode(mode: str) -> dict[str, Any]:
         _state.write(data)
         return session()
     prev = data.get("mode")
+    _stash_mode(data, prev)
     data["mode"] = mode
     data["view"] = mode
     data["mode_entered"] = time.time()
     if prev and prev != mode:
-        data["loaded"] = None
-        data["loaded_name"] = None
         ENGINE.unload()
+        _restore_mode(data, mode)
     OS.enter_mode(mode, data.get("loaded"))
     _state.write(data)
     return session()
@@ -100,11 +126,16 @@ def use_model(item_id: str) -> dict[str, Any]:
         mode = "chat"
     elif modality in {"image", "video", "audio"}:
         mode = modality
+    prev = data.get("mode")
+    _stash_mode(data, prev)
     data["mode"] = mode
     data["view"] = mode
     data["mode_entered"] = time.time()
     data["loaded"] = rec["id"]
     data["loaded_name"] = rec.get("ollama_name") or rec.get("name")
+    by = dict(data.get("by_mode") or {})
+    by[mode] = {"id": rec["id"], "name": data["loaded_name"]}
+    data["by_mode"] = by
     OS.enter_mode(mode, rec["id"])
     _state.write(data)
     if modality == "text":

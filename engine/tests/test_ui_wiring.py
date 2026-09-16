@@ -30,6 +30,7 @@ STATIC_BUTTON_IDS = [
     "chat-new",
     "chat-stop",
     "q-persona",
+    "q-model",
 ]
 
 
@@ -111,3 +112,21 @@ def test_box57_android_searchpc_is_defined():
     ).read_text(encoding="utf-8")
     assert "fun searchPc" in kt
     assert "/api/library/search" in kt
+
+
+def test_box70_per_tab_model_picks_and_chat_scroll():
+    assert 'id="chat-model"' in HTML
+    assert 'id="image-model"' in HTML
+    assert 'id="task-mode"' in HTML
+    assert 'id="later-empty"' in HTML
+    assert "fillPicks" in JS
+    assert "by_mode" in JS
+    css = (ROOT / "atelier" / "atelier.css").read_text(encoding="utf-8")
+    assert "100dvh" in css
+    assert ".chat-log" in css
+    assert "overflow-y: auto" in css
+    # No extra Audio/Video tabs in the nav — Mode dropdown on Chat instead.
+    assert HTML.count('data-m="audio"') == 0
+    assert HTML.count('data-m="video"') == 0
+    assert "Phase 4" in JS and "Phase 7" in JS and "Phase 5" in JS
+    assert "Nothing was faked" in JS

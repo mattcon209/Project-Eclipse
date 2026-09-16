@@ -407,3 +407,63 @@ def test_box56_ollama_blob_without_gguf_suffix(tmp_path):
     assert rec["managed"] is False
     assert rec["modality"] == "text"
     assert "llama3.2" in rec["name"]
+
+
+def _fat_safetensors(path: Path, name_stem: str | None = None) -> Path:
+    header = {"weight": {"dtype": "F16", "shape": [4, 4], "data_offsets": [0, 32]}}
+    raw = json.dumps(header).encode()
+    path.write_bytes(struct.pack("<Q", len(raw)) + raw + b"\0" * (256 * 1024))
+    return path
+
+
+def test_box70_qwen_image_safetensors_is_t2i(tmp_path):
+    p = _fat_safetensors(tmp_path / "Qwen-Image-BF16.safetensors")
+    s = sniff(p)
+    assert s["known"] is True
+    assert s["modality"] == "image"
+    assert s["handler"] == "t2i"
+
+
+def test_box70_search_finds_standalone_safetensors(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    ckpt = home / "ComfyUI" / "models" / "checkpoints"
+    ckpt.mkdir(parents=True)
+    _fat_safetensors(ckpt / "qwen_image_fp8.safetensors")
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    assert out["added"] >= 1
+    rec = next(r for r in out["items"] if "qwen" in (r.get("name") or "").lower() or "qwen" in (r.get("source") or "").lower())
+    assert rec["state"] == "ready"
+    assert rec["modality"] == "image"
+    assert rec["managed"] is False
+
+
+def test_box70_mode_remembers_last_model_per_tab(tmp_path, monkeypatch):
+    from eclipse.orchestrator import session, set_mode, use_model, _state as session_store
+    from eclipse import library as library_mod
+
+    sess = session_store.read()
+    sess["mode"] = None
+    sess["loaded"] = None
+    sess["loaded_name"] = None
+    sess["by_mode"] = {}
+    session_store.write(sess)
+    lib = _lib(tmp_path)
+    ros = _os()
+    text = acquire_run(str(_gguf(tmp_path / "qwen3.gguf")), lib=lib, ros=ros)["record"]
+    img = acquire_run(str(_sdxl(tmp_path / "qwen-image")), lib=lib, ros=ros)["record"]
+    monkeypatch.setattr(library_mod, "LIB", lib)
+    OS.reset()
+    use_model(text["id"])
+    assert session()["mode"] == "chat"
+    assert session()["loaded"] == text["id"]
+    use_model(img["id"])
+    assert session()["mode"] == "image"
+    assert session()["loaded"] == img["id"]
+    assert (session().get("by_mode") or {}).get("chat", {}).get("id") == text["id"]
+    set_mode("chat")
+    assert session()["loaded"] == text["id"]
+    set_mode("image")
+    assert session()["loaded"] == img["id"]

@@ -70,6 +70,7 @@ def setup_function(_fn):
     sess["loaded_name"] = None
     sess["mode"] = None
     sess["view"] = "home"
+    sess["by_mode"] = {}
     session_store.write(sess)
 
 

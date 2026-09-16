@@ -29,7 +29,8 @@ SKIP_DIR_NAMES = {
     "OneDrive",  # scanned via explicit Downloads/Desktop roots
 }
 
-WEIGHT_SUFFIXES = {".gguf", ".ggml"}
+WEIGHT_SUFFIXES = {".gguf", ".ggml", ".safetensors", ".ckpt", ".pt", ".pth", ".bin"}
+SKIP_WEIGHT_HINTS = ("tokenizer", "vocab", "merges", "spiece", "sentencepiece")
 
 
 def default_roots(home: Path | None = None) -> list[Path]:
@@ -68,7 +69,12 @@ def default_roots(home: Path | None = None) -> list[Path]:
         home / "OneDrive" / "Documents" / "LM Studio" / "models",
         home / "models",
         home / "ComfyUI" / "models",
+        home / "ComfyUI" / "models" / "checkpoints",
+        home / "ComfyUI" / "models" / "diffusion_models",
+        home / "ComfyUI" / "models" / "unet",
         home / "stable-diffusion-webui" / "models",
+        home / "stable-diffusion-webui" / "models" / "Stable-diffusion",
+        home / "stable-diffusion-webui-forge" / "models",
         home / "automatic1111" / "models",
         home / "text-generation-webui" / "models",
         home / "llama.cpp" / "models",
@@ -79,7 +85,19 @@ def default_roots(home: Path | None = None) -> list[Path]:
         home / "OneDrive" / "Desktop",
     ]
     for letter in "CDEFG":
-        for tail in ("models", "Models", "AI", "LLM", "llms", "LM Studio", "Ollama", "gguf"):
+        for tail in (
+            "models",
+            "Models",
+            "AI",
+            "LLM",
+            "llms",
+            "LM Studio",
+            "Ollama",
+            "gguf",
+            "ComfyUI/models",
+            "ComfyUI/models/checkpoints",
+            "stable-diffusion-webui/models",
+        ):
             guessed.append(Path(f"{letter}:/{tail}"))
     guessed.extend(_lmstudio_configured_dirs(home))
     out: list[Path] = []
@@ -217,6 +235,15 @@ def find_candidates(root: Path, *, max_depth: int = 8, limit: int = 400) -> list
         if len(found) >= limit:
             break
     return found
+
+
+def _weight_big_enough(path: Path, low: str) -> bool:
+    if "lora" in low:
+        return True
+    try:
+        return path.stat().st_size >= 256 * 1024
+    except OSError:
+        return False
 
 
 def _looks_gguf(path: Path) -> bool:
