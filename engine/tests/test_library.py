@@ -467,3 +467,30 @@ def test_box70_mode_remembers_last_model_per_tab(tmp_path, monkeypatch):
     assert session()["loaded"] == text["id"]
     set_mode("image")
     assert session()["loaded"] == img["id"]
+
+
+def test_box71_comfy_extra_model_paths_yaml(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    weights = tmp_path / "sd" / "models" / "checkpoints"
+    weights.mkdir(parents=True)
+    _fat_safetensors(weights / "qwen_image.safetensors")
+    comfy = home / "ComfyUI"
+    comfy.mkdir(parents=True)
+    (comfy / "extra_model_paths.yaml").write_text(
+        "comfyui:\n"
+        f"  base_path: {tmp_path.joinpath('sd').as_posix()}\n"
+        "  checkpoints: models/checkpoints\n",
+        encoding="utf-8",
+    )
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    rec = next(
+        r
+        for r in out["items"]
+        if "qwen" in (r.get("name") or "").lower() or "qwen" in (r.get("source") or "").lower()
+    )
+    assert rec["state"] == "ready"
+    assert rec["modality"] == "image"
+    assert rec["managed"] is False

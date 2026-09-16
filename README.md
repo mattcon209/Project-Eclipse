@@ -9,10 +9,11 @@ Logged chats + GGUF text handler (Ollama if it’s running, else llama-cpp-pytho
 Library (Phase 1): paste-link acquire + Search this PC.
 
 ```bash
-cd engine
-pip install -r requirements.txt
-python run.py
+pip install -r engine/requirements.txt
+py run.py
 ```
+
+Or from `engine/`: `py run.py`. Binds `0.0.0.0:7740`.
 
 Open `http://<pc>:7740` — Atelier lab UI (same look as the signed-off mockup). Pair with the 6-digit code printed in the terminal.
 

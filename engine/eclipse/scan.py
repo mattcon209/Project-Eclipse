@@ -68,10 +68,21 @@ def default_roots(home: Path | None = None) -> list[Path]:
         home / "Documents" / "LM Studio" / "models",
         home / "OneDrive" / "Documents" / "LM Studio" / "models",
         home / "models",
+        home / "ComfyUI",
         home / "ComfyUI" / "models",
         home / "ComfyUI" / "models" / "checkpoints",
         home / "ComfyUI" / "models" / "diffusion_models",
         home / "ComfyUI" / "models" / "unet",
+        home / "Documents" / "ComfyUI",
+        home / "OneDrive" / "Documents" / "ComfyUI",
+        home / "OneDrive" / "Desktop" / "ComfyUI",
+        local / "Programs" / "ComfyUI",
+        local / "ComfyUI",
+        roaming / "ComfyUI",
+        roaming / "StabilityMatrix",
+        local / "StabilityMatrix",
+        home / "Documents" / "StabilityMatrix",
+        home / "ComfyUI_windows_portable" / "ComfyUI",
         home / "stable-diffusion-webui" / "models",
         home / "stable-diffusion-webui" / "models" / "Stable-diffusion",
         home / "stable-diffusion-webui-forge" / "models",
@@ -100,6 +111,7 @@ def default_roots(home: Path | None = None) -> list[Path]:
         ):
             guessed.append(Path(f"{letter}:/{tail}"))
     guessed.extend(_lmstudio_configured_dirs(home))
+    guessed.extend(_comfy_configured_dirs(home, guessed))
     out: list[Path] = []
     seen: set[str] = set()
     for p in env + guessed:
@@ -114,6 +126,106 @@ def default_roots(home: Path | None = None) -> list[Path]:
             continue
         seen.add(key)
         out.append(resolved)
+    return out
+
+
+COMFY_YAML_KEYS = {
+    "checkpoints",
+    "unet",
+    "diffusion_models",
+    "diffusion-models",
+    "vae",
+    "loras",
+    "lora",
+    "clip",
+    "text_encoders",
+    "clip_vision",
+    "controlnet",
+}
+
+
+def _comfy_configured_dirs(home: Path, seeds: list[Path]) -> list[Path]:
+    """ComfyUI extra_model_paths.yaml points at the real checkpoints folder."""
+    found: list[Path] = []
+    yamls: list[Path] = []
+    seen_yaml: set[str] = set()
+    extra_seeds = list(seeds) + [
+        home / "ComfyUI",
+        home / "Documents" / "ComfyUI",
+        home / "OneDrive" / "Desktop" / "ComfyUI",
+        home / "OneDrive" / "Documents" / "ComfyUI",
+        home / "ComfyUI_windows_portable" / "ComfyUI",
+    ]
+    for seed in extra_seeds:
+        for rel in (
+            Path("extra_model_paths.yaml"),
+            Path("ComfyUI") / "extra_model_paths.yaml",
+            Path("models") / ".." / "extra_model_paths.yaml",
+        ):
+            y = seed / rel
+            try:
+                y = y.resolve()
+            except OSError:
+                continue
+            key = str(y)
+            if key in seen_yaml:
+                continue
+            seen_yaml.add(key)
+            if y.is_file():
+                yamls.append(y)
+    for y in yamls:
+        found.extend(_parse_extra_model_paths(y))
+    return found
+
+
+def _parse_extra_model_paths(path: Path) -> list[Path]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out: list[Path] = []
+    base: Path | None = None
+
+    def _add(p: Path) -> None:
+        try:
+            if p.exists():
+                out.append(p)
+        except OSError:
+            return
+
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip() or ":" not in line:
+            continue
+        indent = len(line) - len(line.lstrip(" \t"))
+        key, _, val = line.partition(":")
+        key = key.strip().lower()
+        val = val.strip().strip("\"'")
+        if indent == 0:
+            base = None
+            continue
+        if key == "base_path" and val:
+            p = Path(val)
+            if not p.is_absolute():
+                p = (path.parent / p)
+            try:
+                p = p.expanduser()
+            except OSError:
+                continue
+            base = p
+            _add(p)
+            _add(p / "models")
+            _add(p / "models" / "checkpoints")
+            _add(p / "models" / "diffusion_models")
+            continue
+        if key in {"is_default"} or val in {"|", ">"}:
+            continue
+        if key not in COMFY_YAML_KEYS and not val:
+            continue
+        folder = Path(val) if val else Path(key)
+        if not folder.is_absolute():
+            folder = (base / folder) if base else (path.parent / folder)
+        _add(folder)
     return out
 
 

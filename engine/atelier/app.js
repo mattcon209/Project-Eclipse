@@ -17,7 +17,7 @@ const helpCopy = {
   },
   search: {
     title: "Search this PC",
-    body: "Looks on MattsGamingPC for models already installed — Hugging Face cache, Ollama, LM Studio, Downloads, common model folders. Nothing is copied. Ready cards point at the files where they sit. The phone never holds the weights.",
+    body: "Looks on MattsGamingPC for models already installed — Hugging Face cache, Ollama, LM Studio, ComfyUI (including extra_model_paths.yaml), Downloads, common model folders. Nothing is copied. Ready cards point at the files where they sit. The phone never holds the weights.",
   },
   persona: {
     title: "Persona",
