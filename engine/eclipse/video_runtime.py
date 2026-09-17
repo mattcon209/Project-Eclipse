@@ -42,10 +42,10 @@ from eclipse.library import list_items
 # Width/height divisible by 32 (LTXV) and 16 (Wan/Hunyuan). Length 1+8k / 1+4k.
 # Fast is no longer a 384×256 8-step smear — that looked like noise on Wan 2.2 5B.
 LADDER = {
-    "fast": {"steps": 12, "cfg": 4.0, "width": 512, "height": 320, "frames": 17, "fps": 16},
+    "fast": {"steps": 16, "cfg": 4.0, "width": 512, "height": 320, "frames": 17, "fps": 16},
     "balanced": {"steps": 20, "cfg": 5.0, "width": 640, "height": 384, "frames": 17, "fps": 24},
     "quality": {"steps": 24, "cfg": 5.0, "width": 704, "height": 384, "frames": 25, "fps": 24},
-    "max": {"steps": 30, "cfg": 5.0, "width": 768, "height": 480, "frames": 33, "fps": 24},
+    "max": {"steps": 30, "cfg": 5.0, "width": 768, "height": 480, "frames": 25, "fps": 24},
 }
 
 VideoError = ImageError
@@ -95,7 +95,8 @@ class VideoEngine:
         wan22 = family == "wan" and ("wan2.2" in blob or "wan-2.2" in blob or "ti2v" in blob)
         if wan22 and source_path:
             opts["cfg"] = 3.5
-            opts["steps"] = max(int(opts["steps"]), 16)
+            # 16 steps at the 640 floor reconstructs the still. Quality moved at 24.
+            opts["steps"] = max(int(opts["steps"]), 20)
         elif wan22:
             opts["cfg"] = max(float(opts["cfg"]), 4.5)
         elif family == "wan":

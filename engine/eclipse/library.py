@@ -133,7 +133,13 @@ def guess_vram_mb(modality: str, size_bytes: int) -> int:
 def register_card(rec: dict[str, Any]) -> None:
     if rec.get("state") != "ready":
         return
-    vram = int(rec.get("vram_balanced_mb") or guess_vram_mb(rec.get("modality") or "unknown", int(rec.get("bytes") or 0)))
+    modality = str(rec.get("modality") or "unknown")
+    size = int(rec.get("bytes") or 0)
+    # Old catalogs stored 14000 for video; 14000*1.15 refuses Max on a 5060 Ti.
+    if modality == "video":
+        vram = guess_vram_mb("video", size)
+    else:
+        vram = int(rec.get("vram_balanced_mb") or guess_vram_mb(modality, size))
     OS.register(
         ModelCard(
             id=rec["id"],

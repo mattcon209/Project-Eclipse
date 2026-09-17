@@ -334,19 +334,33 @@ def test_box110_bind_exposes_wan_vae(tmp_path, monkeypatch):
 def test_box111_wan_fast_is_not_smear():
     assert LADDER["fast"]["width"] >= 512
     assert LADDER["fast"]["frames"] >= 17
-    assert LADDER["fast"]["steps"] >= 12
+    assert LADDER["fast"]["steps"] >= 16
+    assert LADDER["max"]["frames"] <= 25
     assert LADDER["max"]["height"] % 32 == 0
     assert LADDER["quality"]["width"] % 32 == 0
 
 
 def test_box111_video_max_fits_16gb():
-    from eclipse.library import guess_vram_mb
-    from eclipse.resource_os import ResourceOS, ModelCard
+    from eclipse.library import guess_vram_mb, register_card
+    from eclipse.resource_os import OS, ResourceOS, ModelCard
 
     r = ResourceOS()
     vram = guess_vram_mb("video", 6_000_000_000)
     r.register(ModelCard("wan", "video", vram_balanced_mb=vram, size_bytes=6_000_000_000))
     est = r.estimate("wan", "max")
+    assert est.fits is True, est.reason
+    OS.reset()
+    register_card(
+        {
+            "id": "wan-stale",
+            "state": "ready",
+            "modality": "video",
+            "bytes": 6_000_000_000,
+            "vram_balanced_mb": 14000,
+            "name": "wan2.2_ti2v_5B_fp16",
+        }
+    )
+    est = OS.estimate("wan-stale", "max")
     assert est.fits is True, est.reason
 
 
@@ -376,3 +390,29 @@ def test_box112_wan22_14b_refused():
     rec = {"name": "wan2.2_i2v_14B_high_noise", "path": "x"}
     assert refuse_pair(rec, "still.png")
     assert "14B" in (refuse_pair(rec, "still.png") or "")
+
+
+def test_box112_wan22_i2v_fast_has_motion_steps(tmp_path, monkeypatch):
+    from eclipse.video_runtime import VIDEO
+
+    monkeypatch.setattr("eclipse.video_runtime.DATA_DIR", tmp_path)
+    seen = {}
+
+    def _stub(rec, prompt, ladder, seed):
+        seen["ladder"] = ladder
+        return TINY_WEBP
+
+    VIDEO.set_stub(_stub)
+    rec = {
+        "name": "wan2.2_ti2v_5B_fp16",
+        "path": str(tmp_path / "wan2.2_ti2v_5B_fp16.safetensors"),
+        "state": "ready",
+        "modality": "video",
+        "handler": "t2v",
+    }
+    (tmp_path / "wan2.2_ti2v_5B_fp16.safetensors").write_bytes(b"u")
+    still = tmp_path / "still.png"
+    still.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    out = VIDEO.generate(rec, "she turns", ladder="fast", source_path=str(still), job_id="fast-i2v")
+    assert out["steps"] >= 20
+    assert out["frames"] == 17

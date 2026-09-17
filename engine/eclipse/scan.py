@@ -453,6 +453,10 @@ def ingest(paths: Iterable[Path], lib: Library, names: dict[str, str] | None = N
                     existing["vram_balanced_mb"] = guess_vram_mb(
                         info["modality"], int(existing.get("bytes") or 0)
                     )
+                elif info["modality"] == "video":
+                    existing["vram_balanced_mb"] = guess_vram_mb(
+                        "video", int(existing.get("bytes") or 0)
+                    )
                 existing = lib.save(existing)
             added.append(existing)
             dup += 1
