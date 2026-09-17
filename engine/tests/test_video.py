@@ -361,11 +361,11 @@ def test_box112_wan22_i2v_locks_still():
         "image": "eclipse-j.png",
     }
     g = _workflow(w, "the door eases open", LADDER["balanced"], 1, "j")
-    assert g["5"]["class_type"] == "Wan22ImageToVideoLatent"
+    assert g["5"]["class_type"] == "WanImageToVideo"
     assert g["5"]["inputs"]["start_image"] == ["42", 0]
     assert g["42"]["class_type"] == "ImageScale"
     assert g["67"]["class_type"] == "ModelSamplingSD3"
     assert g["67"]["inputs"]["shift"] == 5.0
     assert g["3"]["inputs"]["model"] == ["67", 0]
-    assert g["3"]["inputs"]["positive"] == ["6", 0]
-    assert g["3"]["inputs"]["latent_image"] == ["5", 0]
+    assert g["3"]["inputs"]["positive"] == ["5", 0]
+    assert g["3"]["inputs"]["latent_image"] == ["5", 2]
