@@ -12,6 +12,7 @@ node_modules/
 local.properties
 *.iml
 engine/data/
+GHKEY.md
 .gradle/
 build/
 app/build/
