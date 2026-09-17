@@ -113,6 +113,7 @@ def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
     dtype = "fp8_e4m3fn" if "fp8" in unet_name.lower() else "default"
     stack = {
         "unet_name": unet_name,
+        "unet_path": str(unet_path),
         "vae_name": "",
         "clip_name": "",
         "dtype": dtype,
@@ -249,6 +250,17 @@ def _match_comfy(name: str, choices: list[str]) -> str | None:
 
 
 def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
+    try:
+        return _bind_comfy_names_once(stack)
+    except ImageError as e:
+        msg = str(e)
+        if "has no UNET" not in msg and "has no checkpoint" not in msg:
+            raise
+        _publish_comfy_paths(stack)
+        return _bind_comfy_names_once(stack)
+
+
+def _bind_comfy_names_once(stack: dict[str, str]) -> dict[str, str]:
     out = dict(stack)
     vaes = _comfy_choices("VAELoader", "vae_name")
     clips = _comfy_choices("CLIPLoader", "clip_name")
@@ -281,8 +293,10 @@ def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
     matched = _match_comfy(stack.get("unet_name") or "", unets)
     if unets and not matched:
         shown = ", ".join(unets[:8]) or "(none)"
+        disk = stack.get("unet_path") or ""
+        where = f" On disk at {disk}." if disk else ""
         raise ImageError(
-            f"ComfyUI has no UNET named {stack.get('unet_name')}. "
+            f"ComfyUI has no UNET named {stack.get('unet_name')}.{where} "
             f"It sees: {shown}. Pick one of those. Nothing was faked."
         )
     if matched:
@@ -333,6 +347,7 @@ def _pick_name(
     *,
     prefer: tuple[str, ...] = (),
     skip: Path | None = None,
+    must_prefer: bool = False,
 ) -> str | None:
     ranked: list[tuple[int, str]] = []
     skip_s = str(skip) if skip else ""
@@ -352,9 +367,36 @@ def _pick_name(
             if needle.lower() in low:
                 score = 100 - i
                 break
+        if must_prefer and prefer and score <= 0:
+            continue
         ranked.append((score, _comfy_rel(p) or p.name))
     ranked.sort(key=lambda x: (-x[0], x[1]))
     return ranked[0][1] if ranked else None
+
+
+def _beside_match(unet: Path, folder: str, needles: tuple[str, ...]) -> str | None:
+    """Name must contain a needle. Never the first random file in the folder."""
+    if not unet or not needles:
+        return None
+    models = unet.parent
+    for p in [unet, *unet.parents]:
+        if p.name.lower() in {"diffusion_models", "unet", "checkpoints"}:
+            models = p.parent
+            break
+        if p.name.lower() == "models":
+            models = p
+            break
+    d = models / folder
+    if not d.is_dir():
+        return None
+    want = tuple(n.lower().replace("_", "-") for n in needles)
+    for p in sorted(d.iterdir()):
+        if p.suffix.lower() != ".safetensors":
+            continue
+        low = p.name.lower().replace("_", "-")
+        if any(n in low for n in want):
+            return _comfy_rel(p) or p.name
+    return None
 
 
 def _beside(unet: Path, folder: str, names: tuple[str, ...]) -> str | None:
@@ -610,6 +652,137 @@ def _view(meta: dict[str, Any]) -> bytes:
         raise ImageError(f"Could not fetch the still from ComfyUI: {e}") from e
 
 
+def _comfy_root() -> Path | None:
+    main = _comfy_main()
+    return main.parent if main else None
+
+
+def _models_tree(path: Path) -> Path | None:
+    for p in [path, *path.parents]:
+        if p.name.lower() in {"diffusion_models", "unet", "checkpoints", "vae", "text_encoders", "clip", "loras"}:
+            return p.parent
+        if p.name.lower() == "models":
+            return p
+    return path.parent if path.parent.exists() else None
+
+
+def _expose_weight(src: Path, kind: str) -> None:
+    """Hardlink into the running Comfy models folder. File stays where Search found it."""
+    root = _comfy_root()
+    if not root or not src.is_file():
+        return
+    slot = {
+        "unet": "diffusion_models",
+        "checkpoint": "checkpoints",
+        "vae": "vae",
+        "clip": "text_encoders",
+    }.get(kind, "diffusion_models")
+    dest_dir = root / "models" / slot
+    dest = dest_dir / src.name
+    try:
+        if dest.exists():
+            return
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        os.link(src, dest)
+    except OSError:
+        try:
+            if not dest.exists():
+                dest.symlink_to(src)
+        except OSError:
+            return
+
+
+def _publish_comfy_paths(stack: dict[str, str] | None = None) -> None:
+    """Tell Comfy about folders Search already catalogued. No copy."""
+    trees: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(raw: str | Path | None) -> None:
+        if not raw:
+            return
+        p = Path(str(raw))
+        tree = _models_tree(p if p.is_dir() else p.parent)
+        if not tree:
+            return
+        key = str(tree)
+        if key in seen:
+            return
+        seen.add(key)
+        trees.append(tree)
+        kind = "unet"
+        parts = [x.lower() for x in p.parts]
+        if "vae" in parts:
+            kind = "vae"
+        elif any(x in parts for x in ("text_encoders", "text-encoders", "clip")):
+            kind = "clip"
+        elif "checkpoints" in parts:
+            kind = "checkpoint"
+        if p.is_file():
+            _expose_weight(p, kind)
+
+    if stack:
+        _add(stack.get("unet_path"))
+        _add(stack.get("vae_path"))
+        _add(stack.get("clip_path"))
+    for it in list_items():
+        if it.get("state") == "ready":
+            _add(it.get("path") or it.get("source"))
+    lines = ["# Eclipse — weights stay where Search found them.", ""]
+    for i, tree in enumerate(trees):
+        key = "eclipse" if i == 0 else f"eclipse_{i}"
+        base = tree.parent if tree.name.lower() == "models" else tree
+        models = base / "models" if (base / "models").is_dir() else tree
+        lines.append(f"{key}:")
+        lines.append(f"  base_path: {_yaml_escape(base)}")
+        if models.is_dir():
+            for sub, field in (
+                ("checkpoints", "checkpoints"),
+                ("diffusion_models", "diffusion_models"),
+                ("unet", "unet"),
+                ("vae", "vae"),
+                ("text_encoders", "text_encoders"),
+                ("clip", "clip"),
+                ("loras", "loras"),
+            ):
+                folder = models / sub
+                if folder.is_dir():
+                    lines.append(f"  {field}: models/{sub}")
+        lines.append("")
+    dest = Path(DATA_DIR) / "comfy_extra_model_paths.yaml"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    root = _comfy_root()
+    if root:
+        _merge_eclipse_yaml(root / "extra_model_paths.yaml", "\n".join(lines))
+
+
+def _yaml_escape(path: Path) -> str:
+    return str(path.resolve()).replace("\\", "/")
+
+
+def _merge_eclipse_yaml(path: Path, body: str) -> None:
+    try:
+        old = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError:
+        return
+    kept: list[str] = []
+    skip = False
+    for line in old.splitlines():
+        if line.startswith("eclipse:") or line.startswith("eclipse_"):
+            skip = True
+            continue
+        if skip and line and not line[:1].isspace() and not line.startswith("#"):
+            skip = False
+        if skip:
+            continue
+        kept.append(line)
+    text = "\n".join(kept).rstrip() + "\n\n" + body.strip() + "\n"
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        return
+
+
 def _ensure_comfy() -> None:
     if _comfy_up():
         return
@@ -621,8 +794,12 @@ def _ensure_comfy() -> None:
             "Weights stay on disk; nothing was faked."
         )
     creation = 0x00000008 if os.name == "nt" else 0  # DETACHED_PROCESS on Windows
+    cmd = [str(py), str(main), "--listen", "127.0.0.1", "--port", "8188", "--lowvram"]
+    extra = Path(DATA_DIR) / "comfy_extra_model_paths.yaml"
+    if extra.is_file():
+        cmd += ["--extra-model-paths-config", str(extra)]
     IMAGE._proc = subprocess.Popen(
-        [str(py), str(main), "--listen", "127.0.0.1", "--port", "8188", "--lowvram"],
+        cmd,
         cwd=str(main.parent),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -652,6 +829,7 @@ def _comfy_main() -> Path | None:
         home / "GameAI" / "ComfyUI" / "main.py",
         home / "ComfyUI" / "main.py",
         home / "ComfyUI_windows_portable" / "ComfyUI" / "main.py",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "main.py",
         Path(os.environ.get("ECLIPSE_COMFY_ROOT", "")) / "main.py",
     ):
         if p.is_file():

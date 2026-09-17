@@ -224,3 +224,64 @@ def test_box108_production_never_writes_fake_clip(tmp_path):
     rt = src.read_text(encoding="utf-8")
     assert "never writes a fake clip" in rt.lower()
     assert "write_tiny_webp" in rt
+
+
+def test_box109_wan_refuses_taesdxl_as_vae(tmp_path, monkeypatch):
+    from eclipse.video_runtime import _video_stack, VideoError
+    from eclipse import library as library_mod
+
+    lib = _lib(tmp_path)
+    unet = tmp_path / "models" / "diffusion_models" / "wan2.2_ti2v_5B_fp16.safetensors"
+    unet.parent.mkdir(parents=True)
+    unet.write_bytes(b"u" * 64)
+    vae = tmp_path / "models" / "vae" / "taesdxl_decoder.safetensors"
+    vae.parent.mkdir(parents=True)
+    vae.write_bytes(b"v" * 64)
+    rec = lib.add(
+        {
+            "name": "wan2.2_ti2v_5B_fp16",
+            "path": str(unet),
+            "state": "ready",
+            "format": "safetensors",
+            "modality": "video",
+            "handler": "t2v",
+        }
+    )
+    lib.add(
+        {
+            "name": "taesdxl_decoder",
+            "path": str(vae),
+            "state": "ready",
+            "format": "safetensors",
+            "modality": "vae",
+            "handler": "vae",
+        }
+    )
+    monkeypatch.setattr(library_mod, "LIB", lib)
+    try:
+        _video_stack(rec, "wan")
+        raise AssertionError("taesdxl must not count as Wan VAE")
+    except VideoError as e:
+        msg = str(e).lower()
+        assert "umt5" in msg or "wan vae" in msg or "taesdxl" in msg
+
+
+def test_box109_expose_hardlinks_into_comfy_models(tmp_path, monkeypatch):
+    from eclipse.image_runtime import _expose_weight, _publish_comfy_paths
+
+    src = tmp_path / "AI-Video-Server" / "ComfyUI" / "models" / "diffusion_models" / "wan2.2_ti2v_5B_fp16.safetensors"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"wan-weights")
+    comfy = tmp_path / "GameAI" / "ComfyUI"
+    comfy.mkdir(parents=True)
+    (comfy / "main.py").write_text("# comfy\n", encoding="utf-8")
+    monkeypatch.setattr("eclipse.image_runtime._comfy_main", lambda: comfy / "main.py")
+    monkeypatch.setattr("eclipse.image_runtime.DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: [{"state": "ready", "path": str(src)}])
+    _publish_comfy_paths({"unet_path": str(src), "kind": "unet"})
+    dest = comfy / "models" / "diffusion_models" / src.name
+    assert dest.is_file()
+    assert dest.read_bytes() == b"wan-weights"
+    yaml = (tmp_path / "data" / "comfy_extra_model_paths.yaml").read_text(encoding="utf-8")
+    assert "eclipse:" in yaml
+    assert "diffusion_models" in yaml

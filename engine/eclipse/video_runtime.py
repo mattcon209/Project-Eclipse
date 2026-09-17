@@ -6,6 +6,7 @@ Same ComfyUI runtime as Image. Stub is tests only. Production never writes a fak
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +17,7 @@ from eclipse.image_runtime import (
     IMAGE,
     ImageError,
     _beside,
+    _beside_match,
     _bind_comfy_names,
     _comfy_choices,
     _comfy_rel,
@@ -199,6 +201,7 @@ def _video_stack(rec: dict[str, Any], family: str) -> dict[str, str]:
     stack = {
         "family": family,
         "unet_name": unet_name,
+        "unet_path": str(unet_path),
         "kind": "unet" if kind == "unet" else "checkpoint",
         "dtype": dtype,
         "clip_name": "",
@@ -207,11 +210,11 @@ def _video_stack(rec: dict[str, Any], family: str) -> dict[str, str]:
         "clip_type": "hunyuan_video" if family == "hunyuan" else "wan",
     }
     if family == "hunyuan":
-        stack["clip_name"] = _pick_name(items, "clip", prefer=("clip_l", "clip-l")) or ""
-        stack["clip_name2"] = _pick_name(items, "clip", prefer=("llava_llama3", "llava-llama", "llava_llama")) or ""
+        stack["clip_name"] = _pick_name(items, "clip", prefer=("clip_l", "clip-l"), must_prefer=True) or ""
+        stack["clip_name2"] = _pick_name(items, "clip", prefer=("llava_llama3", "llava-llama", "llava_llama"), must_prefer=True) or ""
         stack["vae_name"] = (
-            _pick_name(items, "vae", prefer=("hunyuan_video_vae", "hunyuan-video-vae"))
-            or _beside(unet_path, "vae", ("hunyuan_video_vae_bf16.safetensors",))
+            _pick_name(items, "vae", prefer=("hunyuan_video_vae", "hunyuan-video-vae"), must_prefer=True)
+            or _beside_match(unet_path, "vae", ("hunyuan-video-vae", "hunyuan_video_vae"))
             or ""
         )
         if not stack["clip_name"] or not stack["clip_name2"] or not stack["vae_name"]:
@@ -220,15 +223,25 @@ def _video_stack(rec: dict[str, Any], family: str) -> dict[str, str]:
                 "Search this PC. Nothing was faked."
             )
         return stack
-    stack["clip_name"] = _pick_name(items, "clip", prefer=("umt5_xxl", "umt5-xxl", "umt5", "t5xxl")) or ""
+    stack["clip_name"] = (
+        _pick_name(items, "clip", prefer=("umt5_xxl", "umt5-xxl", "umt5"), must_prefer=True)
+        or _beside_match(unet_path, "text_encoders", ("umt5",))
+        or ""
+    )
     stack["vae_name"] = (
-        _pick_name(items, "vae", prefer=("wan2.2_vae", "wan_2.2_vae", "wan_2.1_vae", "wan2.1_vae", "wan-2.1-vae"))
-        or _beside(unet_path, "vae", ("wan2.2_vae.safetensors", "wan_2.1_vae.safetensors"))
+        _pick_name(
+            items,
+            "vae",
+            prefer=("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan-2.1-vae", "wan2.2-vae", "wan2.1-vae"),
+            must_prefer=True,
+        )
+        or _beside_match(unet_path, "vae", ("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan2.2-vae", "wan2.1-vae"))
         or ""
     )
     if not stack["clip_name"] or not stack["vae_name"]:
         raise VideoError(
-            "Wan needs umt5 in text_encoders and a Wan VAE in vae. Search this PC. Nothing was faked."
+            "Wan needs umt5 in text_encoders and a Wan VAE in vae (not taesdxl). "
+            "Search this PC. Nothing was faked."
         )
     return stack
 
