@@ -254,7 +254,7 @@ def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
         return _bind_comfy_names_once(stack)
     except ImageError as e:
         msg = str(e)
-        if "has no UNET" not in msg and "has no checkpoint" not in msg:
+        if not any(s in msg for s in ("has no UNET", "has no checkpoint", "has no VAE", "has no CLIP")):
             raise
         _publish_comfy_paths(stack)
         return _bind_comfy_names_once(stack)
@@ -264,8 +264,26 @@ def _bind_comfy_names_once(stack: dict[str, str]) -> dict[str, str]:
     out = dict(stack)
     vaes = _comfy_choices("VAELoader", "vae_name")
     clips = _comfy_choices("CLIPLoader", "clip_name")
-    v = _match_comfy(stack.get("vae_name") or "", vaes)
-    c = _match_comfy(stack.get("clip_name") or "", clips)
+    want_vae = stack.get("vae_name") or ""
+    want_clip = stack.get("clip_name") or ""
+    v = _match_comfy(want_vae, vaes)
+    c = _match_comfy(want_clip, clips)
+    if want_vae and vaes and not v:
+        shown = ", ".join(vaes[:8]) or "(none)"
+        disk = stack.get("vae_path") or ""
+        where = f" On disk at {disk}." if disk else ""
+        raise ImageError(
+            f"ComfyUI has no VAE named {want_vae}.{where} "
+            f"It sees: {shown}. Pick one of those. Nothing was faked."
+        )
+    if want_clip and clips and not c:
+        shown = ", ".join(clips[:8]) or "(none)"
+        disk = stack.get("clip_path") or ""
+        where = f" On disk at {disk}." if disk else ""
+        raise ImageError(
+            f"ComfyUI has no CLIP named {want_clip}.{where} "
+            f"It sees: {shown}. Pick one of those. Nothing was faked."
+        )
     if v:
         out["vae_name"] = v
     if c:
@@ -341,15 +359,15 @@ def _looks_handler(it: dict[str, Any], handler: str) -> bool:
     return False
 
 
-def _pick_name(
+def _pick_file(
     items: list[dict[str, Any]],
     handler: str,
     *,
     prefer: tuple[str, ...] = (),
     skip: Path | None = None,
     must_prefer: bool = False,
-) -> str | None:
-    ranked: list[tuple[int, str]] = []
+) -> Path | None:
+    ranked: list[tuple[int, Path]] = []
     skip_s = str(skip) if skip else ""
     for it in items:
         if it.get("state") != "ready":
@@ -369,24 +387,40 @@ def _pick_name(
                 break
         if must_prefer and prefer and score <= 0:
             continue
-        ranked.append((score, _comfy_rel(p) or p.name))
-    ranked.sort(key=lambda x: (-x[0], x[1]))
+        ranked.append((score, p))
+    ranked.sort(key=lambda x: (-x[0], x[1].name))
     return ranked[0][1] if ranked else None
 
 
-def _beside_match(unet: Path, folder: str, needles: tuple[str, ...]) -> str | None:
-    """Name must contain a needle. Never the first random file in the folder."""
-    if not unet or not needles:
+def _pick_name(
+    items: list[dict[str, Any]],
+    handler: str,
+    *,
+    prefer: tuple[str, ...] = (),
+    skip: Path | None = None,
+    must_prefer: bool = False,
+) -> str | None:
+    hit = _pick_file(items, handler, prefer=prefer, skip=skip, must_prefer=must_prefer)
+    if not hit:
         return None
+    return _comfy_rel(hit) or hit.name
+
+
+def _models_dir_for(unet: Path) -> Path:
     models = unet.parent
     for p in [unet, *unet.parents]:
         if p.name.lower() in {"diffusion_models", "unet", "checkpoints"}:
-            models = p.parent
-            break
+            return p.parent
         if p.name.lower() == "models":
-            models = p
-            break
-    d = models / folder
+            return p
+    return models
+
+
+def _beside_file(unet: Path, folder: str, needles: tuple[str, ...]) -> Path | None:
+    """First safetensors in models/<folder> whose name contains a needle."""
+    if not unet or not needles:
+        return None
+    d = _models_dir_for(unet) / folder
     if not d.is_dir():
         return None
     want = tuple(n.lower().replace("_", "-") for n in needles)
@@ -395,8 +429,16 @@ def _beside_match(unet: Path, folder: str, needles: tuple[str, ...]) -> str | No
             continue
         low = p.name.lower().replace("_", "-")
         if any(n in low for n in want):
-            return _comfy_rel(p) or p.name
+            return p
     return None
+
+
+def _beside_match(unet: Path, folder: str, needles: tuple[str, ...]) -> str | None:
+    """Name must contain a needle. Never the first random file in the folder."""
+    hit = _beside_file(unet, folder, needles)
+    if not hit:
+        return None
+    return _comfy_rel(hit) or hit.name
 
 
 def _beside(unet: Path, folder: str, names: tuple[str, ...]) -> str | None:
@@ -705,10 +747,9 @@ def _publish_comfy_paths(stack: dict[str, str] | None = None) -> None:
         if not tree:
             return
         key = str(tree)
-        if key in seen:
-            return
-        seen.add(key)
-        trees.append(tree)
+        if key not in seen:
+            seen.add(key)
+            trees.append(tree)
         kind = "unet"
         parts = [x.lower() for x in p.parts]
         if "vae" in parts:
@@ -724,6 +765,24 @@ def _publish_comfy_paths(stack: dict[str, str] | None = None) -> None:
         _add(stack.get("unet_path"))
         _add(stack.get("vae_path"))
         _add(stack.get("clip_path"))
+        _add(stack.get("clip_path2"))
+        raw = stack.get("unet_path")
+        if raw:
+            models = _models_dir_for(Path(raw))
+            for folder, kind in (
+                ("diffusion_models", "unet"),
+                ("unet", "unet"),
+                ("checkpoints", "checkpoint"),
+                ("vae", "vae"),
+                ("text_encoders", "clip"),
+                ("clip", "clip"),
+            ):
+                d = models / folder
+                if not d.is_dir():
+                    continue
+                for child in d.iterdir():
+                    if child.suffix.lower() in {".safetensors", ".ckpt"}:
+                        _add(child)
     for it in list_items():
         if it.get("state") == "ready":
             _add(it.get("path") or it.get("source"))

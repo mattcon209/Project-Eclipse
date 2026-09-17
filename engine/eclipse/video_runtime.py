@@ -17,6 +17,7 @@ from eclipse.image_runtime import (
     IMAGE,
     ImageError,
     _beside,
+    _beside_file,
     _beside_match,
     _bind_comfy_names,
     _comfy_choices,
@@ -26,6 +27,7 @@ from eclipse.image_runtime import (
     _http,
     _kind,
     _match_comfy,
+    _pick_file,
     _pick_name,
     _short_comfy_err,
     _stage_image,
@@ -210,34 +212,38 @@ def _video_stack(rec: dict[str, Any], family: str) -> dict[str, str]:
         "clip_type": "hunyuan_video" if family == "hunyuan" else "wan",
     }
     if family == "hunyuan":
-        stack["clip_name"] = _pick_name(items, "clip", prefer=("clip_l", "clip-l"), must_prefer=True) or ""
-        stack["clip_name2"] = _pick_name(items, "clip", prefer=("llava_llama3", "llava-llama", "llava_llama"), must_prefer=True) or ""
-        stack["vae_name"] = (
-            _pick_name(items, "vae", prefer=("hunyuan_video_vae", "hunyuan-video-vae"), must_prefer=True)
-            or _beside_match(unet_path, "vae", ("hunyuan-video-vae", "hunyuan_video_vae"))
-            or ""
+        clip1 = _pick_file(items, "clip", prefer=("clip_l", "clip-l"), must_prefer=True)
+        clip2 = _pick_file(items, "clip", prefer=("llava_llama3", "llava-llama", "llava_llama"), must_prefer=True)
+        vae_p = _pick_file(items, "vae", prefer=("hunyuan_video_vae", "hunyuan-video-vae"), must_prefer=True) or _beside_file(
+            unet_path, "vae", ("hunyuan-video-vae", "hunyuan_video_vae")
         )
+        stack["clip_name"] = (_comfy_rel(clip1) or clip1.name) if clip1 else ""
+        stack["clip_path"] = str(clip1) if clip1 else ""
+        stack["clip_name2"] = (_comfy_rel(clip2) or clip2.name) if clip2 else ""
+        stack["clip_path2"] = str(clip2) if clip2 else ""
+        stack["vae_name"] = (_comfy_rel(vae_p) or vae_p.name) if vae_p else ""
+        stack["vae_path"] = str(vae_p) if vae_p else ""
         if not stack["clip_name"] or not stack["clip_name2"] or not stack["vae_name"]:
             raise VideoError(
                 "Hunyuan needs clip_l + llava_llama3 in text_encoders and hunyuan_video_vae in vae. "
                 "Search this PC. Nothing was faked."
             )
         return stack
-    stack["clip_name"] = (
-        _pick_name(items, "clip", prefer=("umt5_xxl", "umt5-xxl", "umt5"), must_prefer=True)
-        or _beside_match(unet_path, "text_encoders", ("umt5",))
-        or ""
+    clip_p = _pick_file(items, "clip", prefer=("umt5_xxl", "umt5-xxl", "umt5"), must_prefer=True) or _beside_file(
+        unet_path, "text_encoders", ("umt5",)
     )
-    stack["vae_name"] = (
-        _pick_name(
-            items,
-            "vae",
-            prefer=("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan-2.1-vae", "wan2.2-vae", "wan2.1-vae"),
-            must_prefer=True,
-        )
-        or _beside_match(unet_path, "vae", ("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan2.2-vae", "wan2.1-vae"))
-        or ""
+    vae_p = _pick_file(
+        items,
+        "vae",
+        prefer=("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan-2.1-vae", "wan2.2-vae", "wan2.1-vae"),
+        must_prefer=True,
+    ) or _beside_file(
+        unet_path, "vae", ("wan2.2_vae", "wan_2.2_vae", "wan2.1_vae", "wan_2.1_vae", "wan2.2-vae", "wan2.1-vae")
     )
+    stack["clip_name"] = (_comfy_rel(clip_p) or clip_p.name) if clip_p else ""
+    stack["clip_path"] = str(clip_p) if clip_p else ""
+    stack["vae_name"] = (_comfy_rel(vae_p) or vae_p.name) if vae_p else ""
+    stack["vae_path"] = str(vae_p) if vae_p else ""
     if not stack["clip_name"] or not stack["vae_name"]:
         raise VideoError(
             "Wan needs umt5 in text_encoders and a Wan VAE in vae (not taesdxl). "

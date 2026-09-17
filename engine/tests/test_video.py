@@ -285,3 +285,47 @@ def test_box109_expose_hardlinks_into_comfy_models(tmp_path, monkeypatch):
     yaml = (tmp_path / "data" / "comfy_extra_model_paths.yaml").read_text(encoding="utf-8")
     assert "eclipse:" in yaml
     assert "diffusion_models" in yaml
+
+
+def test_box110_bind_exposes_wan_vae(tmp_path, monkeypatch):
+    from eclipse.image_runtime import _bind_comfy_names, ImageError
+
+    src = tmp_path / "AI" / "models" / "vae" / "wan2.2_vae.safetensors"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"vae")
+    unet = tmp_path / "AI" / "models" / "diffusion_models" / "wan2.2_ti2v_5B_fp16.safetensors"
+    unet.parent.mkdir(parents=True)
+    unet.write_bytes(b"unet")
+    comfy = tmp_path / "GameAI" / "ComfyUI"
+    comfy.mkdir(parents=True)
+    (comfy / "main.py").write_text("#\n", encoding="utf-8")
+    monkeypatch.setattr("eclipse.image_runtime._comfy_main", lambda: comfy / "main.py")
+    monkeypatch.setattr("eclipse.image_runtime.DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: [])
+    seen = {"n": 0}
+
+    def fake_choices(node, field):
+        seen["n"] += 1
+        dest = comfy / "models" / "vae" / "wan2.2_vae.safetensors"
+        if node == "UNETLoader":
+            return ["wan2.2_ti2v_5B_fp16.safetensors"]
+        if node == "VAELoader":
+            if dest.is_file():
+                return ["qwen_image_vae.safetensors", "wan2.2_vae.safetensors"]
+            return ["qwen_image_vae.safetensors", "pixel_space"]
+        if node == "CLIPLoader":
+            return ["umt5_xxl.safetensors"]
+        return []
+
+    monkeypatch.setattr("eclipse.image_runtime._comfy_choices", fake_choices)
+    stack = {
+        "kind": "unet",
+        "unet_name": "wan2.2_ti2v_5B_fp16.safetensors",
+        "unet_path": str(unet),
+        "vae_name": "wan2.2_vae.safetensors",
+        "vae_path": str(src),
+        "clip_name": "umt5_xxl.safetensors",
+    }
+    out = _bind_comfy_names(stack)
+    assert out["vae_name"] == "wan2.2_vae.safetensors"
+    assert (comfy / "models" / "vae" / "wan2.2_vae.safetensors").is_file()
