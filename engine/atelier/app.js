@@ -433,11 +433,8 @@ function videoStillSource() {
 
 $("#make").addEventListener("click", () => {
   const extra = {};
-  const sess = lastStatus && lastStatus.session;
-  if (sess && sess.mode === "video") {
-    const src = videoStillSource();
-    if (src) extra.source = src;
-  }
+  const src = videoStillSource() || currentStill;
+  if (src) extra.source = src;
   runMake(extra);
 });
 

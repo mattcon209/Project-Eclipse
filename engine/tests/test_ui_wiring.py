@@ -158,6 +158,7 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert 'kind === "video"' in JS
     assert "lastImageStill" in JS
     assert "videoStillSource" in JS
+    assert "extra.source = src" in JS
     assert "Nothing was faked" in JS
 
 

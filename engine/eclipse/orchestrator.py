@@ -399,7 +399,8 @@ def make_video(
     if pair:
         append_log(job["id"], pair, state="blocked", progress=0)
         return get_job_safe(job["id"])
-    append_log(job["id"], "first_byte", state="running", progress=1)
+    kind = "photo-to-video" if source_path else "text-to-video"
+    append_log(job["id"], f"first_byte · {kind}", state="running", progress=1)
     args = (job["id"], rec, prompt, ladder, seed, source_path or None)
     if VIDEO._stub is not None:
         _run_video(*args)

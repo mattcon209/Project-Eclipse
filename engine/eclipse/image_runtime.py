@@ -489,9 +489,49 @@ def _stage_image(path: Path, job_id: str) -> str:
     if not src.is_file():
         raise ImageError("No still to edit. Make one first. Nothing was faked.")
     name = f"eclipse-{job_id}.png"
+    uploaded = _comfy_upload_input(src, name)
+    if uploaded:
+        return uploaded
     dest = _comfy_input_dir() / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
     return name
+
+
+def _comfy_upload_input(src: Path, name: str) -> str | None:
+    """Put the still in the Comfy that is actually on 8188. Copying into GameAI/input misses the other portable."""
+    import uuid
+
+    bound = "----Eclipse" + uuid.uuid4().hex
+    blob = src.read_bytes()
+    body = (
+        f"--{bound}\r\n"
+        f'Content-Disposition: form-data; name="image"; filename="{name}"\r\n'
+        f"Content-Type: image/png\r\n\r\n"
+    ).encode("utf-8") + blob + (
+        f"\r\n--{bound}\r\n"
+        f'Content-Disposition: form-data; name="overwrite"\r\n\r\n'
+        f"true"
+        f"\r\n--{bound}\r\n"
+        f'Content-Disposition: form-data; name="type"\r\n\r\n'
+        f"input"
+        f"\r\n--{bound}--\r\n"
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        COMFY + "/upload/image",
+        data=body,
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={bound}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+        parsed = json.loads(raw.decode("utf-8") or "{}")
+        if isinstance(parsed, dict) and parsed.get("name"):
+            return str(parsed["name"])
+        return name
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
 
 
 def _clip_ref(graph: dict[str, Any]) -> list[Any]:
