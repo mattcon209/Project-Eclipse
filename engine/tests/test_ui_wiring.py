@@ -132,6 +132,8 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert "100dvh" in css
     assert ".chat-log" in css
     assert "overflow-y: auto" in css
+    assert "rgba(0,0,0,:" not in css
+    assert "atelier.css?v=" in HTML
     # No extra Audio/Video tabs in the nav — Mode dropdown on Chat instead.
     assert HTML.count('data-m="audio"') == 0
     assert HTML.count('data-m="video"') == 0

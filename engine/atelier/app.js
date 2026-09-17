@@ -586,7 +586,7 @@ function renderTurns(turns) {
   const el = $("#chat-log");
   if (!el) return;
   if (!turns || !turns.length) {
-    el.innerHTML = '<div class="empty-frame" id="chat-empty"><span>No thread yet</span><small>Use a Ready text model in Library, then Send.</small></div>';
+    el.innerHTML = '<div class="empty-frame" id="chat-empty"><span>Empty thread</span><small>Type a line, then Send. Prompt is unchanged.</small></div>';
     return;
   }
   el.innerHTML = turns

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#070708" />
   <title>Atelier</title>
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/atelier.css" />
+  <link rel="stylesheet" href="/atelier.css?v=13" />
 </head>
 <body>
   <div id="app">
@@ -123,16 +123,16 @@
             <option value="">text model…</option>
           </select>
           <button class="q" id="q-model" type="button" aria-label="What is the model list?">?</button>
-          <div class="chat-tools">
-            <input id="chat-find" placeholder="search" autocomplete="off" />
-            <button class="ghost" id="chat-new" type="button">New</button>
-          </div>
+        </div>
+        <div class="chat-tools">
+          <input id="chat-find" placeholder="search" autocomplete="off" />
+          <button class="ghost" id="chat-new" type="button">New</button>
         </div>
         <div id="chat-threads" class="chat-threads"></div>
         <div id="chat-log" class="chat-log">
           <div class="empty-frame" id="chat-empty">
             <span>No thread yet</span>
-            <small>Pick a text model here, or Use one in Library, then Send.</small>
+            <small>Pick a text model, then Send. Prompt is unchanged.</small>
           </div>
         </div>
         <div id="later-empty" class="empty-frame hidden">
@@ -188,6 +188,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=12"></script>
+  <script src="/app.js?v=13"></script>
 </body>
 </html>
