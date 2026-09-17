@@ -36,6 +36,7 @@ STATIC_BUTTON_IDS = [
     "train-probe",
     "train-start",
     "q-train",
+    "q-i2v",
 ]
 
 
@@ -159,6 +160,8 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert "lastImageStill" in JS
     assert "videoStillSource" in JS
     assert "extra.source = src" in JS
+    assert "i2v-wrap" in HTML
+    assert 'id="i2v"' in HTML
     assert "Nothing was faked" in JS
 
 

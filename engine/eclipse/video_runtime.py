@@ -617,30 +617,47 @@ def _wan_graph(
                 "crop": "center",
             },
         }
-        i2v_inputs: dict[str, Any] = {
-            "positive": ["6", 0],
-            "negative": ["7", 0],
-            "vae": ["9", 0],
-            "width": w,
-            "height": h,
-            "length": n,
-            "batch_size": 1,
-            "start_image": ["42", 0],
-        }
-        if stack.get("clip_vision_name"):
-            graph["40"] = {
-                "class_type": "CLIPVisionLoader",
-                "inputs": {"clip_name": stack["clip_vision_name"]},
+        if _wan_22(stack):
+            # 5B TI2V: image lives in the 2.2 latent, not Wan 2.1 conditioning.
+            graph["5"] = {
+                "class_type": "Wan22ImageToVideoLatent",
+                "inputs": {
+                    "vae": ["9", 0],
+                    "width": w,
+                    "height": h,
+                    "length": n,
+                    "batch_size": 1,
+                    "start_image": ["42", 0],
+                },
             }
-            graph["43"] = {
-                "class_type": "CLIPVisionEncode",
-                "inputs": {"clip_vision": ["40", 0], "image": ["42", 0], "crop": "center"},
+            graph["3"]["inputs"]["positive"] = ["6", 0]
+            graph["3"]["inputs"]["negative"] = ["7", 0]
+            graph["3"]["inputs"]["latent_image"] = ["5", 0]
+        else:
+            i2v_inputs: dict[str, Any] = {
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "vae": ["9", 0],
+                "width": w,
+                "height": h,
+                "length": n,
+                "batch_size": 1,
+                "start_image": ["42", 0],
             }
-            i2v_inputs["clip_vision_output"] = ["43", 0]
-        graph["5"] = {"class_type": "WanImageToVideo", "inputs": i2v_inputs}
-        graph["3"]["inputs"]["positive"] = ["5", 0]
-        graph["3"]["inputs"]["negative"] = ["5", 1]
-        graph["3"]["inputs"]["latent_image"] = ["5", 2]
+            if stack.get("clip_vision_name"):
+                graph["40"] = {
+                    "class_type": "CLIPVisionLoader",
+                    "inputs": {"clip_name": stack["clip_vision_name"]},
+                }
+                graph["43"] = {
+                    "class_type": "CLIPVisionEncode",
+                    "inputs": {"clip_vision": ["40", 0], "image": ["42", 0]},
+                }
+                i2v_inputs["clip_vision_output"] = ["43", 0]
+            graph["5"] = {"class_type": "WanImageToVideo", "inputs": i2v_inputs}
+            graph["3"]["inputs"]["positive"] = ["5", 0]
+            graph["3"]["inputs"]["negative"] = ["5", 1]
+            graph["3"]["inputs"]["latent_image"] = ["5", 2]
     else:
         graph["5"] = {
             "class_type": "EmptyHunyuanLatentVideo",

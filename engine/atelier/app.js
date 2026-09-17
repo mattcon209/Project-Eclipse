@@ -27,6 +27,10 @@ const helpCopy = {
     title: "Model on this tab",
     body: "Sorted by what the tab does. Chat remembers the last text model; Image remembers the last picture model. Video models sit in the same Image list — Make is a clip. A still on the strip is photo-to-video. Search this PC if a weight is on disk but missing here.",
   },
+  i2v: {
+    title: "Photo to video",
+    body: "On: the selected still is the first frame. Off: prompt only. Wan 2.2 5B TI2V does both from the same file. Needs a still on the strip.",
+  },
   train: {
     title: "Train LoRA",
     body: "A folder of pictures on this PC — files stay put. Matching .txt files are captions; otherwise the file name is the caption. Fast is 200 steps / rank 8. Balanced 800 / 16. Quality 1500 / 32 at 768. Max 2500. Needs kohya_ss or diffusers+peft. Never writes a fake LoRA.",
@@ -225,6 +229,8 @@ function applyTaskSurface(m) {
     if ($("#later-body")) $("#later-body").textContent = pair[1];
   }
   const videoOn = m === "video";
+  if ($("#i2v-wrap")) $("#i2v-wrap").classList.toggle("hidden", !videoOn);
+  if ($("#q-i2v")) $("#q-i2v").classList.toggle("hidden", !videoOn);
   if ($("#canvas-empty-title")) $("#canvas-empty-title").textContent = videoOn ? "No clip yet" : "No still yet";
   if ($("#canvas-empty-body")) $("#canvas-empty-body").textContent = videoOn
     ? "Pick LTXV / Hunyuan / Wan, then Make. A still on the strip becomes photo-to-video. Prompt is unchanged."
@@ -424,6 +430,8 @@ async function runMake(extra) {
 }
 
 function videoStillSource() {
+  const box = $("#i2v");
+  if (box && !box.checked) return null;
   if (currentStillJob && (currentStillJob.kind === "image" || currentStillJob.kind === "edit") && currentStill) {
     return currentStill;
   }
