@@ -230,6 +230,28 @@ def _guess_from_name(blob: str) -> dict[str, Any] | None:
         return {"modality": "vae", "handler": "vae", "notes": "VAE companion."}
     if any(x in n for x in ("/text-encoders/", "/text_encoders/", "\\text_encoders\\", "/clip/", "\\clip\\", "/models/clip", "qwen-2.5-vl", "qwen2.5-vl")):
         return {"modality": "clip", "handler": "clip", "notes": "Text encoder / CLIP companion."}
+    video_needles = (
+        "ltxv",
+        "ltx-video",
+        "ltxvideo",
+        "ltx-2",
+        "cogvideo",
+        "cog-video",
+        "hunyuan-video",
+        "hunyuanvideo",
+        "wan2.",
+        "wan2-",
+        "wan-2",
+        "wan21",
+        "wan22",
+        "wan-i2v",
+        "wan-t2v",
+        "text-to-video",
+        "mochi-1",
+        "mochi1",
+    )
+    if any(x in n for x in video_needles):
+        return {"modality": "video", "handler": "t2v", "notes": "Video weights (name/path)."}
     image_needles = (
         "qwen-image",
         "qwenimage",
@@ -264,8 +286,6 @@ def _guess_from_name(blob: str) -> dict[str, Any] | None:
     )
     if any(x in n for x in image_needles):
         return {"modality": "image", "handler": "t2i", "notes": "Image weights (name/path)."}
-    if any(x in n for x in ("ltxv", "cogvideo", "hunyuan-video", "wan2.1", "wan-2", "text-to-video", "mochi-1")):
-        return {"modality": "video", "handler": "t2v", "notes": "Video weights (name/path)."}
     if any(x in n for x in ("whisper", "parakeet", "fish-speech", "f5-tts", "kokoro", "xtts", "openvoice", "sensevoice")):
         return {"modality": "speech", "handler": "stt", "notes": "Speech weights (name/path)."}
     if any(x in n for x in ("musicgen", "stable-audio", "audiogen")):

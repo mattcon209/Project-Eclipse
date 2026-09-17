@@ -575,3 +575,37 @@ def test_box73_scan_drops_missing_and_inbox_bin(tmp_path):
     assert rec_bin["id"] not in ids
     assert out["removed"] >= 2
     assert all(it.get("format") != "bin" for it in out["items"])
+
+
+def test_box74_wan_in_diffusion_models_is_video(tmp_path):
+    folder = tmp_path / "models" / "diffusion_models"
+    folder.mkdir(parents=True)
+    p = _fat_safetensors(folder / "wan2.1_t2v_1.3B_fp8.safetensors")
+    s = sniff(p)
+    assert s["known"] is True
+    assert s["modality"] == "video"
+    assert s["handler"] == "t2v"
+
+
+def test_box74_search_finds_ai_video_server_wan(tmp_path):
+    from eclipse.scan import scan_machine
+
+    home = tmp_path / "home"
+    dm = home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "diffusion_models"
+    dm.mkdir(parents=True)
+    _fat_safetensors(dm / "wan2.1_t2v_1.3B_fp8.safetensors")
+    code = home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "comfy" / "ldm" / "wan"
+    code.mkdir(parents=True)
+    (code / "model.py").write_text("class WanModel:\n    pass\n", encoding="utf-8")
+    lib = _lib(tmp_path)
+    out = scan_machine(lib=lib, home=home)
+    rec = next(
+        r
+        for r in out["items"]
+        if "wan" in (r.get("name") or "").lower() or "wan" in (r.get("source") or "").lower()
+    )
+    assert rec["state"] == "ready"
+    assert rec["modality"] == "video"
+    assert rec["handler"] == "t2v"
+    assert rec["managed"] is False
+    assert not any((r.get("path") or "").endswith(".py") for r in out["items"])

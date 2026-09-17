@@ -28,6 +28,7 @@ python -m pytest tests -v
 | 22 | KPI endpoint is paired | `test_box22_*` |
 | 30–51 | Library, detect, allowlist, size-gate, paste→Ready, scan, Use | `test_library.py` |
 | 52–56 | Search this PC + Ollama blobs | `test_box52_*`–`test_box56_*` |
+| 70–74 | Comfy checkpoints / extra_model_paths / GameAI; Wan in diffusion_models is Video; AI-Video-Server portable | `test_box70_*`–`test_box74_*` |
 | 57 | Every static button is wired; favicon; Android searchPc | `test_ui_wiring.py` |
 | 60–69 | Phase 2 chats: persist, pass-through, warm turns, search, persona, API | `test_chat.py` |
 | 80–88 | Phase 3 stills: VAE/CLIP companions, stub PNG, unfiltered prompt, refuse non-PNG, AIO checkpoint, seed, nested ckpt names, Qwen hybrid CLIP | `test_image.py` |

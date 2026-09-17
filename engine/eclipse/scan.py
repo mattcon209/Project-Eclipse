@@ -27,6 +27,9 @@ SKIP_DIR_NAMES = {
     "Packages",
     "Microsoft",
     "OneDrive",  # scanned via explicit Downloads/Desktop roots
+    "python_embeded",
+    "python_embedded",
+    "ldm",
 }
 
 WEIGHT_SUFFIXES = {".gguf", ".ggml", ".safetensors", ".ckpt"}
@@ -92,6 +95,14 @@ def default_roots(home: Path | None = None) -> list[Path]:
         local / "StabilityMatrix",
         home / "Documents" / "StabilityMatrix",
         home / "ComfyUI_windows_portable" / "ComfyUI",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "checkpoints",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "diffusion_models",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "unet",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "vae",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "text_encoders",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "loras",
         home / "stable-diffusion-webui" / "models",
         home / "stable-diffusion-webui" / "models" / "Stable-diffusion",
         home / "stable-diffusion-webui-forge" / "models",
@@ -119,6 +130,7 @@ def default_roots(home: Path | None = None) -> list[Path]:
             "stable-diffusion-webui/models",
         ):
             guessed.append(Path(f"{letter}:/{tail}"))
+    guessed.extend(_portable_comfy_dirs(home))
     guessed.extend(_lmstudio_configured_dirs(home))
     guessed.extend(_comfy_configured_dirs(home, guessed))
     out: list[Path] = []
@@ -136,6 +148,47 @@ def default_roots(home: Path | None = None) -> list[Path]:
         seen.add(key)
         out.append(resolved)
     return out
+
+
+
+def _portable_comfy_dirs(home: Path) -> list[Path]:
+    """Portable ComfyUI trees under the user folder, including AI-Video-Server."""
+    found: list[Path] = []
+    bases: list[Path] = [
+        home / "ComfyUI_windows_portable",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable",
+    ]
+    try:
+        for child in home.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.lower() in {"comfyui_windows_portable", "comfyui"}:
+                bases.append(child)
+            nested = child / "ComfyUI_windows_portable"
+            bases.append(nested)
+    except OSError:
+        pass
+    seen: set[str] = set()
+    for base in bases:
+        for root in (base, base / "ComfyUI"):
+            models = root / "models"
+            for folder in (
+                root,
+                models,
+                models / "checkpoints",
+                models / "diffusion_models",
+                models / "unet",
+                models / "vae",
+                models / "text_encoders",
+                models / "clip",
+                models / "loras",
+            ):
+                key = str(folder)
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(folder)
+    return found
 
 
 COMFY_YAML_KEYS = {
@@ -164,6 +217,8 @@ def _comfy_configured_dirs(home: Path, seeds: list[Path]) -> list[Path]:
         home / "OneDrive" / "Desktop" / "ComfyUI",
         home / "OneDrive" / "Documents" / "ComfyUI",
         home / "ComfyUI_windows_portable" / "ComfyUI",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable" / "ComfyUI",
+        home / "AI-Video-Server" / "ComfyUI_windows_portable",
     ]
     for seed in extra_seeds:
         for rel in (
