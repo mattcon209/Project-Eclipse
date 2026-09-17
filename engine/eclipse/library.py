@@ -119,7 +119,8 @@ def guess_vram_mb(modality: str, size_bytes: int) -> int:
     if modality == "image":
         return 7000 if mb > 2000 else 4200
     if modality == "video":
-        return 14000
+        # 16 GB recipes are already short/small. 14000*1.15 refused Max on a 5060 Ti.
+        return 11800
     if modality == "lora":
         return 0
     if modality == "speech":

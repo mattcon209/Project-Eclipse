@@ -156,6 +156,8 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert "Video handler is Phase 7" not in JS
     assert 'id="clip"' in HTML
     assert 'kind === "video"' in JS
+    assert "lastImageStill" in JS
+    assert "videoStillSource" in JS
     assert "Nothing was faked" in JS
 
 

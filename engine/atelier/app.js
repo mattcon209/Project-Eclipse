@@ -5,7 +5,7 @@ const HELP_KEY = "eclipse-help-hidden";
 const helpCopy = {
   ladder: {
     title: "Quality ladder",
-    body: "Four rungs, one control. Fast is a sketch. Balanced is the daily driver. Quality keeps it. Max is queued and slower. Tap Enhance on a Fast still to promote it without retyping. On Video the rungs are short clips on 16 GB: Fast 9 frames, Balanced 17, Quality 25, Max 33.",
+    body: "Four rungs, one control. Fast is a sketch. Balanced is the daily driver. Quality keeps it. Max is queued and slower. Tap Enhance on a Fast still to promote it without retyping. On Video: Fast 17 frames at 512, Balanced 17 at 640, Quality 25, Max 33. A still on the strip stays the photo-to-video source even after a clip lands.",
   },
   seed: {
     title: "Seed",
@@ -39,6 +39,7 @@ let lastStatus = null;
 let libItems = [];
 let currentStill = null;
 let currentStillJob = null;
+let lastImageStill = null;
 let stripUrls = [];
 
 const LATER = {
@@ -422,11 +423,20 @@ async function runMake(extra) {
   }
 }
 
+function videoStillSource() {
+  if (currentStillJob && (currentStillJob.kind === "image" || currentStillJob.kind === "edit") && currentStill) {
+    return currentStill;
+  }
+  if (lastImageStill) return lastImageStill;
+  return null;
+}
+
 $("#make").addEventListener("click", () => {
   const extra = {};
   const sess = lastStatus && lastStatus.session;
-  if (sess && sess.mode === "video" && currentStillJob && (currentStillJob.kind === "image" || currentStillJob.kind === "edit")) {
-    extra.source = currentStill;
+  if (sess && sess.mode === "video") {
+    const src = videoStillSource();
+    if (src) extra.source = src;
   }
   runMake(extra);
 });
@@ -564,6 +574,7 @@ async function showStill(job) {
   if (empty) empty.classList.add("hidden");
   currentStill = job.id;
   currentStillJob = job;
+  if (job.kind === "image" || job.kind === "edit") lastImageStill = job.id;
   markStrip(job.id);
   filmFromJob(job);
   syncStillActions();

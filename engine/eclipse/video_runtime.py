@@ -39,11 +39,13 @@ from eclipse.image_runtime import (
 from eclipse.library import list_items
 
 # LTXV length is 1+8k; Hunyuan/Wan length is 1+4k. 9/17/25/33 fit both.
+# Width/height divisible by 32 (LTXV) and 16 (Wan/Hunyuan). Length 1+8k / 1+4k.
+# Fast is no longer a 384×256 8-step smear — that looked like noise on Wan 2.2 5B.
 LADDER = {
-    "fast": {"steps": 8, "cfg": 3.0, "width": 384, "height": 256, "frames": 9, "fps": 16},
-    "balanced": {"steps": 16, "cfg": 3.0, "width": 512, "height": 320, "frames": 17, "fps": 24},
-    "quality": {"steps": 24, "cfg": 4.0, "width": 640, "height": 384, "frames": 25, "fps": 24},
-    "max": {"steps": 30, "cfg": 4.0, "width": 768, "height": 512, "frames": 33, "fps": 24},
+    "fast": {"steps": 12, "cfg": 4.0, "width": 512, "height": 320, "frames": 17, "fps": 16},
+    "balanced": {"steps": 20, "cfg": 5.0, "width": 640, "height": 384, "frames": 17, "fps": 24},
+    "quality": {"steps": 24, "cfg": 5.0, "width": 704, "height": 384, "frames": 25, "fps": 24},
+    "max": {"steps": 30, "cfg": 5.0, "width": 768, "height": 480, "frames": 33, "fps": 24},
 }
 
 VideoError = ImageError
@@ -89,6 +91,8 @@ class VideoEngine:
         if reason:
             raise VideoError(reason)
         opts = dict(LADDER.get(ladder) or LADDER["balanced"])
+        if family == "wan":
+            opts["cfg"] = max(float(opts["cfg"]), 5.0)
         if self._stub is not None:
             self.impl = "stub"
             self.loads += 1

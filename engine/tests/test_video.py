@@ -84,7 +84,7 @@ def test_box102_ltxv_graphs():
     }
     g = _workflow(stack, "hallway", LADDER["fast"], 7, "j")
     assert g["5"]["class_type"] == "EmptyLTXVLatentVideo"
-    assert g["5"]["inputs"]["length"] == 9
+    assert g["5"]["inputs"]["length"] == 17
     assert g["11"]["class_type"] == "SaveAnimatedWEBP"
     stack["image"] = "eclipse-j.png"
     g = _workflow(stack, "the door eases open", LADDER["balanced"], 7, "j")
@@ -329,3 +329,22 @@ def test_box110_bind_exposes_wan_vae(tmp_path, monkeypatch):
     out = _bind_comfy_names(stack)
     assert out["vae_name"] == "wan2.2_vae.safetensors"
     assert (comfy / "models" / "vae" / "wan2.2_vae.safetensors").is_file()
+
+
+def test_box111_wan_fast_is_not_smear():
+    assert LADDER["fast"]["width"] >= 512
+    assert LADDER["fast"]["frames"] >= 17
+    assert LADDER["fast"]["steps"] >= 12
+    assert LADDER["max"]["height"] % 32 == 0
+    assert LADDER["quality"]["width"] % 32 == 0
+
+
+def test_box111_video_max_fits_16gb():
+    from eclipse.library import guess_vram_mb
+    from eclipse.resource_os import ResourceOS, ModelCard
+
+    r = ResourceOS()
+    vram = guess_vram_mb("video", 6_000_000_000)
+    r.register(ModelCard("wan", "video", vram_balanced_mb=vram, size_bytes=6_000_000_000))
+    est = r.estimate("wan", "max")
+    assert est.fits is True, est.reason
