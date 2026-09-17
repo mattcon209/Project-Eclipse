@@ -31,3 +31,4 @@ python -m pytest tests -v
 | 57 | Every static button is wired; favicon; Android searchPc | `test_ui_wiring.py` |
 | 60–69 | Phase 2 chats: persist, pass-through, warm turns, search, persona, API | `test_chat.py` |
 | 80–88 | Phase 3 stills: VAE/CLIP companions, stub PNG, unfiltered prompt, refuse non-PNG, AIO checkpoint, seed, nested ckpt names, Qwen hybrid CLIP | `test_image.py` |
+| 89 | Image canvas strip keeps stills; tap restores; no Gallery tab | `test_box89_*` |

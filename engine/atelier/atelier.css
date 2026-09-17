@@ -131,6 +131,19 @@ body { height: 100dvh; max-height: 100dvh; overflow: hidden; }
   background: rgba(0,0,0,.45); padding: 4px 8px; border-radius: 4px;
   max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.strip {
+  display: flex; gap: 6px; padding: 8px 0 2px;
+  overflow-x: auto; overflow-y: hidden; flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.strip.hidden { display: none !important; }
+.thumb {
+  width: 44px; height: 44px; border-radius: 3px; background: #1a1614;
+  border: 1px solid #2a2420; flex: 0 0 auto; overflow: hidden; opacity: .7;
+  padding: 0; cursor: pointer; font-family: inherit;
+}
+.thumb.on { opacity: 1; outline: 1px solid var(--copper); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .ladder {
   display: flex; background: var(--surface); border-radius: 8px; padding: 3px; gap: 2px; align-items: center;
   flex-shrink: 0;

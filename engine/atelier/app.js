@@ -33,6 +33,8 @@ let token = localStorage.getItem(TOKEN_KEY) || "";
 let hiddenHelp = JSON.parse(localStorage.getItem(HELP_KEY) || "{}");
 let lastStatus = null;
 let libItems = [];
+let currentStill = null;
+let stripUrls = [];
 
 const LATER = {
   audio: ["Audio", "Audio handler is Phase 4. Nothing was faked."],
@@ -116,9 +118,11 @@ function applyStatus(s) {
   $("#ram-line").textContent = ram.total_mb ? Math.round(ram.used_mb / 1024 * 10) / 10 + " / " + Math.round(ram.total_mb / 1024 * 10) / 10 + " GB" : "RAM —";
   const lad = s.session?.ladder || "balanced";
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
-  const loaded = s.session?.loaded_name || "—";
-  const short = loaded.length > 18 ? loaded.slice(0, 16) + "…" : loaded;
-  $("#filmstock").textContent = `${short} · seed ${s.session?.seed ?? "—"} · ${lad}`;
+  if (!currentStill) {
+    const loaded = s.session?.loaded_name || "—";
+    const short = loaded.length > 18 ? loaded.slice(0, 16) + "…" : loaded;
+    $("#filmstock").textContent = `${short} · seed ${s.session?.seed ?? "—"} · ${lad}`;
+  }
   const seedInp = $("#seed");
   const seedRnd = $("#seed-random");
   if (seedInp && document.activeElement !== seedInp && s.session?.seed != null) seedInp.value = s.session.seed;
@@ -351,7 +355,7 @@ $("#make").addEventListener("click", async () => {
       if (err && job.log && job.log.length) err.textContent = job.log[job.log.length - 1].line || "";
     }
     if (!job.artifact && err && !err.textContent) err.textContent = "Make finished without a still.";
-    refreshJobs();
+    await refreshJobs();
   } catch (e) {
     if (err) err.textContent = e.message || "Make failed.";
   } finally {
@@ -359,27 +363,100 @@ $("#make").addEventListener("click", async () => {
   }
 });
 
-async function showStill(job) {
+async function fetchStillUrl(jobId) {
   const headers = {};
   if (token) headers.Authorization = "Bearer " + token;
-  const res = await fetch("/api/jobs/" + job.id + "/still", { headers });
-  if (!res.ok) return;
+  const res = await fetch("/api/jobs/" + jobId + "/still", { headers });
+  if (!res.ok) return null;
   const blob = await res.blob();
+  if (!blob || blob.size < 32) return null;
+  return URL.createObjectURL(blob);
+}
+
+function filmFromJob(job) {
+  const el = $("#filmstock");
+  if (!el) return;
+  const p = (job && job.payload) || {};
+  const sess = (lastStatus && lastStatus.session) || {};
+  const seed = p.seed != null ? p.seed : sess.seed;
+  const lad = p.ladder || sess.ladder || "balanced";
+  const loaded = sess.loaded_name || "—";
+  const short = loaded.length > 18 ? loaded.slice(0, 16) + "…" : loaded;
+  el.textContent = `${short} · seed ${seed ?? "—"} · ${lad}`;
+}
+
+function markStrip(id) {
+  document.querySelectorAll("#strip .thumb").forEach((b) => b.classList.toggle("on", b.dataset.id === id));
+}
+
+function stillJobs(jobs) {
+  return (jobs || []).filter((j) => j && j.id && j.artifact && j.state === "done" && (j.kind === "image" || j.kind === "edit"));
+}
+
+async function showStill(job) {
+  if (!job || !job.id) return;
+  const url = await fetchStillUrl(job.id);
+  if (!url) return;
   const img = $("#still");
   const empty = $("#canvas-empty");
-  if (!img) return;
+  if (!img) {
+    URL.revokeObjectURL(url);
+    return;
+  }
   if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
-  const url = URL.createObjectURL(blob);
   img.dataset.url = url;
   img.src = url;
   img.classList.remove("hidden");
   if (empty) empty.classList.add("hidden");
+  currentStill = job.id;
+  markStrip(job.id);
+  filmFromJob(job);
+}
+
+async function refreshStrip(jobs) {
+  const el = $("#strip");
+  if (!el) return;
+  const list = stillJobs(jobs).slice(0, 12);
+  stripUrls.forEach((u) => URL.revokeObjectURL(u));
+  stripUrls = [];
+  if (!list.length) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  const bits = [];
+  for (const j of list) {
+    const url = await fetchStillUrl(j.id);
+    if (!url) continue;
+    stripUrls.push(url);
+    const on = j.id === currentStill ? " on" : "";
+    bits.push(`<button type="button" class="thumb${on}" data-id="${escapeHtml(j.id)}" aria-label="still"><img alt="" src="${url}" /></button>`);
+  }
+  if (!bits.length) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.innerHTML = bits.join("");
+  el.querySelectorAll(".thumb").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const job = list.find((j) => j.id === b.dataset.id);
+      if (job) await showStill(job);
+    });
+  });
+  if (!currentStill || !list.some((j) => j.id === currentStill)) {
+    await showStill(list[0]);
+  } else {
+    markStrip(currentStill);
+  }
 }
 
 async function refreshJobs() {
   try {
     const r = await api("/api/jobs");
     renderJobs(r.jobs || []);
+    await refreshStrip(r.jobs || []);
   } catch (_) {}
 }
 

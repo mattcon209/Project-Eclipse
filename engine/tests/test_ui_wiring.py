@@ -139,3 +139,14 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert HTML.count('data-m="video"') == 0
     assert "Phase 4" in JS and "Phase 7" in JS and "Phase 5" in JS
     assert "Nothing was faked" in JS
+
+
+def test_box89_image_strip_keeps_stills():
+    assert 'id="strip"' in HTML
+    css = (ROOT / "atelier" / "atelier.css").read_text(encoding="utf-8")
+    assert ".strip" in css
+    assert ".thumb" in css
+    assert "refreshStrip" in JS
+    assert "stillJobs" in JS
+    assert "currentStill" in JS
+    assert HTML.count('data-m="gallery"') == 0
