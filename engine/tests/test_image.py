@@ -264,6 +264,129 @@ def test_box88_qwen_checkpoint_uses_external_clip(tmp_path, monkeypatch):
     assert graph["6"]["inputs"]["clip"] == ["8", 0]
 
 
+def test_box90_delete_still_unlinks_png(tmp_path, monkeypatch):
+    from eclipse import library as library_mod
+    from eclipse.jobs import get, remove
+
+    lib = _lib(tmp_path)
+    models = tmp_path / "models"
+    unet = models / "diffusion_models" / "qwen_image_edit_2509_fp8_e4m3fn.safetensors"
+    vae = models / "vae" / "qwen_image_vae.safetensors"
+    clip = models / "text_encoders" / "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    unet.parent.mkdir(parents=True)
+    vae.parent.mkdir(parents=True)
+    clip.parent.mkdir(parents=True)
+    unet.write_bytes(b"u")
+    vae.write_bytes(b"v")
+    clip.write_bytes(b"c")
+    rec = lib.add(
+        {
+            "name": unet.stem,
+            "path": str(unet),
+            "state": "ready",
+            "format": "safetensors",
+            "modality": "image",
+            "handler": "t2i",
+            "managed": False,
+        }
+    )
+    lib.add({"name": vae.stem, "path": str(vae), "state": "ready", "format": "safetensors", "modality": "vae", "handler": "vae", "managed": False})
+    lib.add({"name": clip.stem, "path": str(clip), "state": "ready", "format": "safetensors", "modality": "clip", "handler": "clip", "managed": False})
+    monkeypatch.setattr(library_mod, "LIB", lib)
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lib.items)
+    OS.reset()
+    IMAGE.set_stub(_png_stub)
+    use_model(rec["id"])
+    job = make_image("hallway")
+    art = Path(job["artifact"])
+    assert art.is_file()
+    gone = remove(job["id"])
+    assert gone and gone["id"] == job["id"]
+    assert not art.exists()
+    assert get(job["id"]) is None
+
+
+def test_box91_enhance_promotes_ladder(tmp_path, monkeypatch):
+    from eclipse import library as library_mod
+    from eclipse.orchestrator import set_ladder
+
+    lib = _lib(tmp_path)
+    unet = tmp_path / "models" / "diffusion_models" / "qwen_image_edit_2509_fp8_e4m3fn.safetensors"
+    vae = tmp_path / "models" / "vae" / "qwen_image_vae.safetensors"
+    clip = tmp_path / "models" / "text_encoders" / "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    unet.parent.mkdir(parents=True)
+    vae.parent.mkdir(parents=True)
+    clip.parent.mkdir(parents=True)
+    unet.write_bytes(b"u")
+    vae.write_bytes(b"v")
+    clip.write_bytes(b"c")
+    rec = lib.add(
+        {
+            "name": unet.stem,
+            "path": str(unet),
+            "state": "ready",
+            "format": "safetensors",
+            "modality": "image",
+            "handler": "t2i",
+            "managed": False,
+        }
+    )
+    lib.add({"name": vae.stem, "path": str(vae), "state": "ready", "format": "safetensors", "modality": "vae", "handler": "vae", "managed": False})
+    lib.add({"name": clip.stem, "path": str(clip), "state": "ready", "format": "safetensors", "modality": "clip", "handler": "clip", "managed": False})
+    monkeypatch.setattr(library_mod, "LIB", lib)
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lib.items)
+    OS.reset()
+    IMAGE.set_stub(_png_stub)
+    use_model(rec["id"])
+    set_ladder("fast")
+    first = make_image("wet concrete corridor")
+    assert first["payload"]["ladder"] == "fast"
+    nxt = make_image("", enhance=True, source=first["id"])
+    assert nxt["payload"]["prompt"] == "wet concrete corridor"
+    assert nxt["payload"]["ladder"] == "balanced"
+    assert nxt["payload"]["seed"] == first["payload"]["seed"]
+    assert nxt.get("state") == "done"
+
+
+def test_box92_qwen_edit_graph_loads_reference():
+    from eclipse.image_runtime import _workflow
+
+    stack = {
+        "kind": "unet",
+        "unet_name": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+        "vae_name": "qwen_image_vae.safetensors",
+        "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "clip_type": "qwen_image",
+        "dtype": "fp8_e4m3fn",
+        "latent": "EmptySD3LatentImage",
+        "image": "eclipse-ref.png",
+    }
+    graph = _workflow(stack, "add a door ajar", {"steps": 4, "cfg": 1.0, "width": 512, "height": 512}, 1, "j")
+    kinds = {n["class_type"] for n in graph.values()}
+    assert "LoadImage" in kinds
+    assert "TextEncodeQwenImageEditPlus" in kinds
+    assert graph["41"]["inputs"]["image"] == "eclipse-ref.png"
+    assert graph["6"]["inputs"]["image1"] == ["41", 0]
+
+
+def test_box93_sd_edit_uses_vae_encode():
+    from eclipse.image_runtime import _workflow
+
+    stack = {
+        "kind": "checkpoint",
+        "unet_name": "dreamshaper_8.safetensors",
+        "vae_name": "",
+        "clip_name": "",
+        "clip_type": "stable_diffusion",
+        "dtype": "default",
+        "latent": "EmptyLatentImage",
+        "image": "eclipse-ref.png",
+    }
+    graph = _workflow(stack, "more tungsten", {"steps": 20, "cfg": 2.5, "width": 768, "height": 768}, 7, "j")
+    assert graph["5"]["class_type"] == "VAEEncode"
+    assert graph["3"]["inputs"]["denoise"] == 0.55
+
+
 def test_box84_non_png_is_refused():
     IMAGE.set_stub(lambda *a: b"not a picture")
     rec = {"id": "x", "handler": "t2i", "modality": "image", "path": "/tmp/x.safetensors", "state": "ready"}

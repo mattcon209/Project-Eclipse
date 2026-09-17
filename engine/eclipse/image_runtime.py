@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -61,6 +62,7 @@ class ImageEngine:
         ladder: str = "balanced",
         seed: int = 441029,
         job_id: str = "still",
+        source_path: str | None = None,
     ) -> dict[str, Any]:
         self._stop = False
         if rec.get("handler") in {"vae", "clip", "lora"}:
@@ -387,6 +389,82 @@ def _write_still(job_id: str, png: bytes) -> Path:
     return path
 
 
+def _comfy_input_dir() -> Path:
+    main = _comfy_main()
+    if main:
+        d = main.parent / "input"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    d = Path(DATA_DIR) / "comfy-input"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _stage_image(path: Path, job_id: str) -> str:
+    src = Path(path)
+    if not src.is_file():
+        raise ImageError("No still to edit. Make one first. Nothing was faked.")
+    name = f"eclipse-{job_id}.png"
+    dest = _comfy_input_dir() / name
+    shutil.copy2(src, dest)
+    return name
+
+
+def _clip_ref(graph: dict[str, Any]) -> list[Any]:
+    node = graph.get("8") or {}
+    if node.get("class_type") == "CLIPLoader":
+        return ["8", 0]
+    return ["4", 1]
+
+
+def _vae_ref(graph: dict[str, Any]) -> list[Any]:
+    node = graph.get("9") or {}
+    if node.get("class_type") == "VAELoader":
+        return ["9", 0]
+    return ["4", 2]
+
+
+def _with_image(graph: dict[str, Any], stack: dict[str, str], prompt: str, opts: dict[str, Any]) -> dict[str, Any]:
+    image = stack.get("image") or ""
+    if not image:
+        return graph
+    graph = dict(graph)
+    graph["41"] = {"class_type": "LoadImage", "inputs": {"image": image}}
+    sampler = dict(graph["3"])
+    sampler["inputs"] = dict(sampler.get("inputs") or {})
+    if _qwenish(stack.get("unet_name") or ""):
+        graph["67"] = {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"shift": 3.1, "model": ["4", 0]},
+        }
+        graph["6"] = {
+            "class_type": "TextEncodeQwenImageEditPlus",
+            "inputs": {
+                "prompt": prompt,
+                "clip": _clip_ref(graph),
+                "vae": _vae_ref(graph),
+                "image1": ["41", 0],
+            },
+        }
+        graph["7"] = {
+            "class_type": "TextEncodeQwenImageEditPlus",
+            "inputs": {
+                "prompt": "",
+                "clip": _clip_ref(graph),
+                "vae": _vae_ref(graph),
+                "image1": ["41", 0],
+            },
+        }
+        sampler["inputs"]["model"] = ["67", 0]
+        sampler["inputs"]["denoise"] = 1.0
+        graph["3"] = sampler
+        return graph
+    graph["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["41", 0], "vae": _vae_ref(graph)}}
+    sampler["inputs"]["denoise"] = float(opts.get("denoise") or 0.55)
+    graph["3"] = sampler
+    return graph
+
+
 def _comfy_run(
     stack: dict[str, str],
     prompt: str,
@@ -448,7 +526,7 @@ def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: in
         "inputs": {"width": int(opts["width"]), "height": int(opts["height"]), "batch_size": 1},
     }
     if stack.get("kind") == "checkpoint" and stack.get("vae_name") and stack.get("clip_name"):
-        return {
+        graph = {
             "3": sampler,
             "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": stack["unet_name"]}},
             "5": empty,
@@ -462,8 +540,9 @@ def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: in
             "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
             "11": save,
         }
+        return _with_image(graph, stack, prompt, opts)
     if stack.get("kind") == "checkpoint":
-        return {
+        graph = {
             "3": sampler,
             "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": stack["unet_name"]}},
             "5": empty,
@@ -472,7 +551,8 @@ def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: in
             "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
             "11": save,
         }
-    return {
+        return _with_image(graph, stack, prompt, opts)
+    graph = {
         "3": sampler,
         "4": {
             "class_type": "UNETLoader",
@@ -489,6 +569,7 @@ def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: in
         "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
         "11": save,
     }
+    return _with_image(graph, stack, prompt, opts)
 
 
 def _history_images(rec: dict[str, Any]) -> list[dict[str, Any]]:

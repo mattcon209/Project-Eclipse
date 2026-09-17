@@ -20,6 +20,7 @@ from eclipse.calibrator import run as cal_run
 from eclipse.jobs import cancel as job_cancel
 from eclipse.jobs import get as job_get
 from eclipse.jobs import list_jobs
+from eclipse.jobs import remove as job_remove
 from eclipse.acquire import AcquireError
 from eclipse.acquire import run as acquire_run
 from eclipse.acquire import scan_folder
@@ -83,6 +84,9 @@ class SeedIn(BaseModel):
 
 class MakeIn(BaseModel):
     prompt: str = Field(default="", max_length=4000)
+    enhance: bool = False
+    edit: bool = False
+    source: str | None = None
 
 
 class AcquireIn(BaseModel):
@@ -216,6 +220,21 @@ def cancel(job_id: str, authorization: str | None = Header(default=None)) -> dic
     if not j:
         raise HTTPException(404, "No such job.")
     return j
+
+
+@app.delete("/api/jobs/{job_id}")
+def job_delete(job_id: str, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    existing = job_get(job_id)
+    if not existing:
+        raise HTTPException(404, "No such job.")
+    if existing.get("state") in {"running", "queued", "downloading"}:
+        IMAGE.stop()
+        job_cancel(job_id)
+    j = job_remove(job_id)
+    if not j:
+        raise HTTPException(404, "No such job.")
+    return {"ok": True, "id": job_id}
 
 
 @app.get("/api/jobs/{job_id}/still")

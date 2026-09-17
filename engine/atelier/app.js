@@ -34,13 +34,13 @@ let hiddenHelp = JSON.parse(localStorage.getItem(HELP_KEY) || "{}");
 let lastStatus = null;
 let libItems = [];
 let currentStill = null;
+let currentStillJob = null;
 let stripUrls = [];
 
 const LATER = {
   audio: ["Audio", "Audio handler is Phase 4. Nothing was faked."],
   video: ["Video", "Video handler is Phase 7. Nothing was faked."],
   talk: ["Talk", "Talk handler is Phase 5. Nothing was faked."],
-  edit: ["Edit", "Image edit is a later hop. Stills are Phase 3."],
 };
 
 function clock() {
@@ -181,7 +181,7 @@ $("#pair-btn").addEventListener("click", async () => {
 });
 
 function go(m) {
-  const tab = m === "audio" || m === "video" || m === "talk" || m === "edit" ? "chat" : m;
+  const tab = m === "audio" || m === "video" || m === "talk" ? "chat" : (m === "edit" ? "image" : m);
   document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === tab));
   ["home", "image", "chat", "library", "jobs"].forEach((id) => {
     const el = $("#screen-" + id);
@@ -205,7 +205,7 @@ document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click"
 
 function applyTaskSurface(m) {
   const tm = $("#task-mode");
-  if (tm && (m === "chat" || m === "image" || LATER[m])) tm.value = m === "edit" ? "chat" : m;
+  if (tm && (m === "chat" || m === "image" || m === "edit" || LATER[m])) tm.value = m === "edit" ? "image" : m;
   const later = $("#later-empty");
   const log = $("#chat-log");
   const threads = $("#chat-threads");
@@ -335,14 +335,37 @@ if ($("#seed-random")) {
   });
 }
 
-$("#make").addEventListener("click", async () => {
+function syncStillActions() {
+  const has = !!currentStill;
+  const lad = ((currentStillJob && currentStillJob.payload) || {}).ladder || "";
+  if ($("#edit")) $("#edit").classList.toggle("hidden", !has);
+  if ($("#enhance")) $("#enhance").classList.toggle("hidden", !has || lad === "max");
+}
+
+function clearCanvas() {
+  const img = $("#still");
+  const empty = $("#canvas-empty");
+  if (img) {
+    if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+    img.dataset.url = "";
+    img.removeAttribute("src");
+    img.classList.add("hidden");
+  }
+  if (empty) empty.classList.remove("hidden");
+  currentStill = null;
+  currentStillJob = null;
+  syncStillActions();
+}
+
+async function runMake(extra) {
   const err = $("#image-err");
   if (err) err.textContent = "";
-  const prompt = $("#prompt").value.trim();
-  const btn = $("#make");
-  if (btn) btn.disabled = true;
+  const prompt = ($("#prompt") && $("#prompt").value.trim()) || "";
+  const body = Object.assign({ prompt }, extra || {});
+  const btns = ["#make", "#edit", "#enhance"].map((s) => $(s)).filter(Boolean);
+  btns.forEach((b) => { b.disabled = true; });
   try {
-    let job = await api("/api/make", { method: "POST", body: JSON.stringify({ prompt }) });
+    let job = await api("/api/make", { method: "POST", body: JSON.stringify(body) });
     if (err) err.textContent = (job.log && job.log[job.log.length - 1] && job.log[job.log.length - 1].line) || "";
     for (let i = 0; i < 900; i++) {
       if (job.artifact) {
@@ -359,9 +382,35 @@ $("#make").addEventListener("click", async () => {
   } catch (e) {
     if (err) err.textContent = e.message || "Make failed.";
   } finally {
-    if (btn) btn.disabled = false;
+    btns.forEach((b) => { b.disabled = false; });
   }
-});
+}
+
+$("#make").addEventListener("click", () => runMake({}));
+if ($("#edit")) {
+  $("#edit").addEventListener("click", () => {
+    if (!currentStill) return;
+    runMake({ edit: true, source: currentStill });
+  });
+}
+if ($("#enhance")) {
+  $("#enhance").addEventListener("click", () => {
+    if (!currentStill) return;
+    runMake({ enhance: true, source: currentStill });
+  });
+}
+
+async function deleteStill(id) {
+  if (!id) return;
+  const err = $("#image-err");
+  try {
+    await api("/api/jobs/" + id, { method: "DELETE" });
+    if (currentStill === id) clearCanvas();
+    await refreshJobs();
+  } catch (e) {
+    if (err) err.textContent = e.message || "Couldn’t delete.";
+  }
+}
 
 async function fetchStillUrl(jobId) {
   const headers = {};
@@ -409,8 +458,10 @@ async function showStill(job) {
   img.classList.remove("hidden");
   if (empty) empty.classList.add("hidden");
   currentStill = job.id;
+  currentStillJob = job;
   markStrip(job.id);
   filmFromJob(job);
+  syncStillActions();
 }
 
 async function refreshStrip(jobs) {
@@ -422,6 +473,7 @@ async function refreshStrip(jobs) {
   if (!list.length) {
     el.classList.add("hidden");
     el.innerHTML = "";
+    if (currentStill) clearCanvas();
     return;
   }
   const bits = [];
@@ -430,25 +482,35 @@ async function refreshStrip(jobs) {
     if (!url) continue;
     stripUrls.push(url);
     const on = j.id === currentStill ? " on" : "";
-    bits.push(`<button type="button" class="thumb${on}" data-id="${escapeHtml(j.id)}" aria-label="still"><img alt="" src="${url}" /></button>`);
+    bits.push(`<button type="button" class="thumb${on}" data-id="${escapeHtml(j.id)}" aria-label="still"><img alt="" src="${url}" /><span class="thumb-x" data-del="${escapeHtml(j.id)}" aria-label="Delete still">×</span></button>`);
   }
   if (!bits.length) {
     el.classList.add("hidden");
     el.innerHTML = "";
+    if (currentStill) clearCanvas();
     return;
   }
   el.classList.remove("hidden");
   el.innerHTML = bits.join("");
   el.querySelectorAll(".thumb").forEach((b) => {
-    b.addEventListener("click", async () => {
+    b.addEventListener("click", async (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest(".thumb-x")) return;
       const job = list.find((j) => j.id === b.dataset.id);
       if (job) await showStill(job);
+    });
+  });
+  el.querySelectorAll(".thumb-x").forEach((x) => {
+    x.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      deleteStill(x.dataset.del);
     });
   });
   if (!currentStill || !list.some((j) => j.id === currentStill)) {
     await showStill(list[0]);
   } else {
     markStrip(currentStill);
+    syncStillActions();
   }
 }
 
@@ -473,7 +535,8 @@ function renderJobs(jobs) {
       const cancel = canCancel
         ? `<button type="button" class="ghost cancel" data-id="${escapeHtml(j.id)}">Cancel</button>`
         : "";
-      return `<article class="job"><div class="st"><span>${escapeHtml(j.state)} · ${escapeHtml(j.kind)}</span>${cancel}</div><h3>${escapeHtml(j.title)}</h3><p>${escapeHtml(last)}</p></article>`;
+      const del = `<button type="button" class="ghost delete" data-id="${escapeHtml(j.id)}">Delete</button>`;
+      return `<article class="job"><div class="st"><span>${escapeHtml(j.state)} · ${escapeHtml(j.kind)}</span><span>${cancel}${del}</span></div><h3>${escapeHtml(j.title)}</h3><p>${escapeHtml(last)}</p></article>`;
     })
     .join("");
   el.querySelectorAll(".cancel").forEach((b) => {
@@ -485,6 +548,9 @@ function renderJobs(jobs) {
         b.textContent = e.message || "Failed";
       }
     });
+  });
+  el.querySelectorAll(".delete").forEach((b) => {
+    b.addEventListener("click", () => deleteStill(b.dataset.id));
   });
 }
 

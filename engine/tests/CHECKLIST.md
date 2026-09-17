@@ -32,3 +32,4 @@ python -m pytest tests -v
 | 60–69 | Phase 2 chats: persist, pass-through, warm turns, search, persona, API | `test_chat.py` |
 | 80–88 | Phase 3 stills: VAE/CLIP companions, stub PNG, unfiltered prompt, refuse non-PNG, AIO checkpoint, seed, nested ckpt names, Qwen hybrid CLIP | `test_image.py` |
 | 89 | Image canvas strip keeps stills; tap restores; no Gallery tab | `test_box89_*` |
+| 90–93 | Delete still PNG, Enhance next ladder, Qwen edit graph, SD img2img | `test_box90_*`–`test_box93_*` |

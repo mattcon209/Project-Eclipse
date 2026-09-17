@@ -31,6 +31,8 @@ STATIC_BUTTON_IDS = [
     "chat-stop",
     "q-persona",
     "q-model",
+    "edit",
+    "enhance",
 ]
 
 
@@ -72,6 +74,7 @@ def test_box57_js_api_paths_exist_on_gateway():
         ("/api/library", "get"),
         ("/api/chats", "get"),
         ("/api/personas", "get"),
+        ("/api/jobs/x", "delete"),
     ):
         fn = getattr(client, method)
         body = {} if method == "post" else None

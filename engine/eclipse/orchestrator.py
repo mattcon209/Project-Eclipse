@@ -9,7 +9,7 @@ from eclipse.config import DATA_DIR, PROJECT_DEFAULT
 import threading
 
 from eclipse.image_runtime import IMAGE, ImageError
-from eclipse.jobs import append_log, create as create_job, update as job_update
+from eclipse.jobs import append_log, create as create_job, get as job_get, update as job_update
 from eclipse.library import get_item, register_card
 from eclipse.pass_through import unchanged
 from eclipse.resource_os import OS
@@ -172,25 +172,80 @@ def use_model(item_id: str) -> dict[str, Any]:
     return {"ok": True, "record": rec, "fit": {"fits": est.fits, "vram_mb": est.vram_mb, "reason": est.reason}, "session": session()}
 
 
-def make_image(prompt: str) -> dict[str, Any]:
+_LADDER_ORDER = ("fast", "balanced", "quality", "max")
+
+
+def _next_ladder(current: str) -> str | None:
+    cur = current if current in _LADDER_ORDER else "balanced"
+    i = _LADDER_ORDER.index(cur)
+    if i >= len(_LADDER_ORDER) - 1:
+        return None
+    return _LADDER_ORDER[i + 1]
+
+
+def make_image(
+    prompt: str,
+    *,
+    enhance: bool = False,
+    edit: bool = False,
+    source: str | None = None,
+) -> dict[str, Any]:
     prompt = unchanged(prompt)
     data = session()
     if data.get("mode") != "image":
         set_mode("image")
         data = session()
     rec = get_item(data.get("loaded")) if data.get("loaded") else None
-    if data.get("seed_random"):
-        seed = secrets.randbelow(2**32)
-        sess = _state.read()
-        sess["seed"] = seed
-        _state.write(sess)
+    src = job_get(source) if source else None
+    src_payload = (src or {}).get("payload") or {}
+    source_path = str((src or {}).get("artifact") or "") if (enhance or edit) else ""
+    if enhance or edit:
+        if not src or not source_path:
+            job = create_job(
+                "edit" if edit else "image",
+                (prompt or "untitled")[:80],
+                {"prompt": prompt, "ladder": data.get("ladder") or "balanced", "seed": int(data.get("seed") or 441029)},
+            )
+            append_log(job["id"], "Pick a still on the strip first. Nothing was faked.", state="blocked")
+            return get_job_safe(job["id"])
+    if enhance:
+        prompt = unchanged(str(src_payload.get("prompt") or prompt or ""))
+        seed = int(src_payload.get("seed") or data.get("seed") or 441029)
+        nxt = _next_ladder(str(src_payload.get("ladder") or data.get("ladder") or "balanced"))
+        if not nxt:
+            job = create_job("image", (prompt or "untitled")[:80], {"prompt": prompt, "ladder": "max", "seed": seed})
+            append_log(job["id"], "Already Max. Make a new still or Edit this one.", state="blocked")
+            return get_job_safe(job["id"])
+        ladder = nxt
+        kind = "image"
+        source_path = ""
+    elif edit:
+        if not prompt.strip():
+            prompt = unchanged(str(src_payload.get("prompt") or ""))
+        if data.get("seed_random"):
+            seed = secrets.randbelow(2**32)
+            sess = _state.read()
+            sess["seed"] = seed
+            _state.write(sess)
+        else:
+            seed = int(data.get("seed") or 441029)
+        ladder = data.get("ladder") or "balanced"
+        kind = "edit"
     else:
-        seed = int(data.get("seed") or 441029)
-    ladder = data.get("ladder") or "balanced"
+        if data.get("seed_random"):
+            seed = secrets.randbelow(2**32)
+            sess = _state.read()
+            sess["seed"] = seed
+            _state.write(sess)
+        else:
+            seed = int(data.get("seed") or 441029)
+        ladder = data.get("ladder") or "balanced"
+        kind = "image"
+        source_path = ""
     job = create_job(
-        "image",
+        kind,
         (prompt or "untitled")[:80],
-        {"prompt": prompt, "ladder": ladder, "seed": seed},
+        {"prompt": prompt, "ladder": ladder, "seed": seed, "source": source if (edit or enhance) else None},
     )
     if rec and rec.get("state") == "ready":
         register_card(rec)
@@ -215,7 +270,7 @@ def make_image(prompt: str) -> dict[str, Any]:
             append_log(job["id"], "No image model loaded. Nothing was faked.", state="blocked")
         return get_job_safe(job["id"])
     append_log(job["id"], "first_byte", state="running", progress=1)
-    args = (job["id"], rec, prompt, ladder, seed)
+    args = (job["id"], rec, prompt, ladder, seed, source_path or None)
     if IMAGE._stub is not None:
         _run_image(*args)
     else:
@@ -223,12 +278,20 @@ def make_image(prompt: str) -> dict[str, Any]:
     return get_job_safe(job["id"])
 
 
-def _run_image(job_id: str, rec: dict[str, Any], prompt: str, ladder: str, seed: int) -> None:
+
+def _run_image(
+    job_id: str,
+    rec: dict[str, Any],
+    prompt: str,
+    ladder: str,
+    seed: int,
+    source_path: str | None = None,
+) -> None:
     if not OS.begin_heavy(job_id):
         append_log(job_id, "Queued — one heavy GPU job at a time.", state="queued", progress=0)
         return
     try:
-        out = IMAGE.generate(rec, prompt, ladder=ladder, seed=seed, job_id=job_id)
+        out = IMAGE.generate(rec, prompt, ladder=ladder, seed=seed, job_id=job_id, source_path=source_path)
         job_update(job_id, artifact=out.get("path"), error=None)
         append_log(
             job_id,
