@@ -91,8 +91,12 @@ class VideoEngine:
         if reason:
             raise VideoError(reason)
         opts = dict(LADDER.get(ladder) or LADDER["balanced"])
-        if family == "wan":
-            opts["cfg"] = max(float(opts["cfg"]), 5.0)
+        blob = ((rec.get("name") or "") + " " + Path(str(rec.get("path") or "")).name).lower().replace("_", "-")
+        wan22 = family == "wan" and ("wan2.2" in blob or "wan-2.2" in blob or "ti2v" in blob)
+        if wan22 and source_path:
+            opts["cfg"] = 3.5
+        elif family == "wan":
+            opts["cfg"] = max(float(opts["cfg"]), 4.0)
         if self._stub is not None:
             self.impl = "stub"
             self.loads += 1
@@ -587,7 +591,7 @@ def _wan_graph(
                 "seed": int(seed) % (2**32),
                 "steps": int(opts["steps"]),
                 "cfg": float(opts["cfg"]),
-                "sampler_name": "uni_pc" if _wan_22(stack) else "euler",
+                "sampler_name": "euler",
                 "scheduler": "simple",
                 "denoise": 1.0,
                 "model": model_ref,
@@ -600,9 +604,12 @@ def _wan_graph(
         "11": save,
     }
     if _wan_22(stack):
+        # 14B likes ~8; 5B TI2V at 8 + CFG 5 is rainbow/black-hole warp.
+        blob = (stack.get("unet_name") or "").lower().replace("_", "-")
+        shift = 5.0 if ("ti2v" in blob or "5b" in blob) else 8.0
         graph["67"] = {
             "class_type": "ModelSamplingSD3",
-            "inputs": {"shift": 8.0, "model": ["4", 0]},
+            "inputs": {"shift": shift, "model": ["4", 0]},
         }
         graph["3"]["inputs"]["model"] = ["67", 0]
     if stack.get("image"):

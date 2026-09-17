@@ -365,7 +365,7 @@ def test_box112_wan22_i2v_locks_still():
     assert g["5"]["inputs"]["start_image"] == ["42", 0]
     assert g["42"]["class_type"] == "ImageScale"
     assert g["67"]["class_type"] == "ModelSamplingSD3"
-    assert g["67"]["inputs"]["shift"] == 8.0
+    assert g["67"]["inputs"]["shift"] == 5.0
     assert g["3"]["inputs"]["model"] == ["67", 0]
     assert g["3"]["inputs"]["positive"] == ["6", 0]
     assert g["3"]["inputs"]["latent_image"] == ["5", 0]
