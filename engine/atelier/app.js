@@ -238,13 +238,12 @@ function fillPicks() {
       const n = ((i.name || "") + " " + (i.path || "")).toLowerCase().replace(/_/g, "-");
       if (n.includes("/vae/") || n.includes("\\vae\\") || n.includes("-vae.") || n.includes("/models/vae")) return false;
       if (n.includes("text-encoder") || n.includes("/clip/") || n.includes("qwen-2.5-vl") || n.includes("qwen2.5-vl")) return false;
-      const p = (i.path || i.name || "").toLowerCase();
-      if (!(p.endsWith(".safetensors") || p.endsWith(".ckpt") || p.endsWith(".gguf") || p.includes("model_index"))) return false;
       return i.handler === "t2i" || i.modality === "image" || i.modality === "video";
     });
     const cur = (by.image && by.image.id) || (mode === "image" ? loaded : "") || img.value;
     img.innerHTML = '<option value="">image model…</option>' + pics.map((i) => {
-      const label = (i.path || "").split(/[\\/]/).pop() || i.name;
+      const file = (i.path || "").split(/[\\/]/).pop() || "";
+      const label = (file && file.includes(".")) ? file : (i.name || file);
       return `<option value="${escapeHtml(i.id)}">${escapeHtml(label)}</option>`;
     }).join("");
     if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;

@@ -67,7 +67,14 @@ class ImageEngine:
             raise ImageError("Pick the diffusion model in Image, not a VAE / CLIP / LoRA.")
         if rec.get("handler") not in {"t2i", None} and rec.get("modality") != "image":
             raise ImageError("No image model loaded.")
-        opts = LADDER.get(ladder) or LADDER["balanced"]
+        opts = dict(LADDER.get(ladder) or LADDER["balanced"])
+        name = str(rec.get("name") or rec.get("path") or "").lower().replace("_", "-")
+        if "4step" in name or "4-step" in name:
+            opts["steps"] = min(int(opts["steps"]), 4)
+            opts["cfg"] = 1.0
+        elif "8step" in name or "8-step" in name:
+            opts["steps"] = min(int(opts["steps"]), 8)
+            opts["cfg"] = 1.0
         if self._stub is not None:
             self.impl = "stub"
             self.loads += 1
@@ -111,8 +118,6 @@ def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
         "clip_type": _clip_type(unet_name),
         "latent": "EmptySD3LatentImage" if _qwenish(unet_name) else "EmptyLatentImage",
     }
-    if kind == "checkpoint":
-        return stack
     items = list_items()
     prefer_vae = ("qwen_image_vae",) if _qwenish(unet_name) else ()
     prefer_clip = ("qwen_2.5_vl", "qwen2.5-vl") if _qwenish(unet_name) else ()
@@ -124,6 +129,15 @@ def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
         "text_encoders",
         ("qwen_2.5_vl_7b_fp8_scaled.safetensors", "qwen_2.5_vl_7b.safetensors"),
     )
+    if kind == "checkpoint":
+        stack["vae_name"] = vae_name or ""
+        stack["clip_name"] = clip_name or ""
+        if _qwenish(unet_name) and (not vae_name or not clip_name):
+            raise ImageError(
+                "Qwen Edit checkpoints are UNET-only — they need models/vae/qwen_image_vae "
+                "and models/text_encoders/qwen_2.5_vl on disk. Search this PC again. Nothing was faked."
+            )
+        return stack
     if not vae_name or not clip_name:
         missing = []
         if not vae_name:
@@ -176,9 +190,12 @@ def _weight_file(path: Path) -> Path:
     if path.is_file() or not path.exists():
         return path
     if path.is_dir():
-        hits = sorted(path.rglob("*.safetensors")) + sorted(path.rglob("*.ckpt"))
-        if len(hits) == 1:
-            return hits[0]
+        hits = [p for p in path.rglob("*") if p.suffix.lower() in {".safetensors", ".ckpt"}]
+        if hits:
+            try:
+                return max(hits, key=lambda p: p.stat().st_size)
+            except OSError:
+                return hits[0]
     return path
 
 
@@ -231,9 +248,24 @@ def _match_comfy(name: str, choices: list[str]) -> str | None:
 
 def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
     out = dict(stack)
+    vaes = _comfy_choices("VAELoader", "vae_name")
+    clips = _comfy_choices("CLIPLoader", "clip_name")
+    v = _match_comfy(stack.get("vae_name") or "", vaes)
+    c = _match_comfy(stack.get("clip_name") or "", clips)
+    if v:
+        out["vae_name"] = v
+    if c:
+        out["clip_name"] = c
     if stack.get("kind") == "checkpoint":
         choices = _comfy_choices("CheckpointLoaderSimple", "ckpt_name")
         matched = _match_comfy(stack.get("unet_name") or "", choices)
+        if not matched:
+            unets = _comfy_choices("UNETLoader", "unet_name")
+            u = _match_comfy(stack.get("unet_name") or "", unets)
+            if u:
+                out["kind"] = "unet"
+                out["unet_name"] = u
+                return out
         if choices and not matched:
             shown = ", ".join(choices[:8]) or "(none)"
             raise ImageError(
@@ -253,14 +285,6 @@ def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
         )
     if matched:
         out["unet_name"] = matched
-    vaes = _comfy_choices("VAELoader", "vae_name")
-    clips = _comfy_choices("CLIPLoader", "clip_name")
-    v = _match_comfy(stack.get("vae_name") or "", vaes)
-    c = _match_comfy(stack.get("clip_name") or "", clips)
-    if v:
-        out["vae_name"] = v
-    if c:
-        out["clip_name"] = c
     return out
 
 
@@ -334,8 +358,14 @@ def _pick_name(
 def _beside(unet: Path, folder: str, names: tuple[str, ...]) -> str | None:
     if not unet:
         return None
-    parent = unet.parent
-    models = parent.parent if parent.name.lower() in {"diffusion_models", "unet", "checkpoints"} else parent
+    models = unet.parent
+    for p in [unet, *unet.parents]:
+        if p.name.lower() in {"diffusion_models", "unet", "checkpoints"}:
+            models = p.parent
+            break
+        if p.name.lower() == "models":
+            models = p
+            break
     d = models / folder
     for n in names:
         if (d / n).is_file():
@@ -417,6 +447,21 @@ def _workflow(stack: dict[str, str], prompt: str, opts: dict[str, Any], seed: in
         "class_type": latent,
         "inputs": {"width": int(opts["width"]), "height": int(opts["height"]), "batch_size": 1},
     }
+    if stack.get("kind") == "checkpoint" and stack.get("vae_name") and stack.get("clip_name"):
+        return {
+            "3": sampler,
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": stack["unet_name"]}},
+            "5": empty,
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["8", 0]}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["8", 0]}},
+            "8": {
+                "class_type": "CLIPLoader",
+                "inputs": {"clip_name": stack["clip_name"], "type": stack.get("clip_type") or "qwen_image"},
+            },
+            "9": {"class_type": "VAELoader", "inputs": {"vae_name": stack["vae_name"]}},
+            "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
+            "11": save,
+        }
     if stack.get("kind") == "checkpoint":
         return {
             "3": sampler,

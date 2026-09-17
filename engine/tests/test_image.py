@@ -177,8 +177,8 @@ def test_box85_checkpoint_does_not_need_vae(tmp_path, monkeypatch):
     from eclipse.image_runtime import _workflow
 
     rec = {
-        "name": "Qwen-Edit-abliterated-checkpoint_v1.2",
-        "path": str(tmp_path / "models" / "checkpoints" / "Qwen-Edit-abliterated-checkpoint_v1.2.safetensors"),
+        "name": "dreamshaper_8",
+        "path": str(tmp_path / "models" / "checkpoints" / "dreamshaper_8.safetensors"),
         "handler": "t2i",
         "modality": "image",
     }
@@ -214,7 +214,7 @@ def test_box87_nested_checkpoint_uses_comfy_rel(tmp_path, monkeypatch):
             / "models"
             / "checkpoints"
             / "v1.2"
-            / "Qwen-Edit-abliterated-checkpint_v1.2.safetensors"
+            / "dreamshaper_8.safetensors"
         ),
         "handler": "t2i",
         "modality": "image",
@@ -222,16 +222,46 @@ def test_box87_nested_checkpoint_uses_comfy_rel(tmp_path, monkeypatch):
     monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: [])
     stack = resolve_stack(rec)
     assert stack["kind"] == "checkpoint"
-    assert stack["unet_name"] == "v1.2/Qwen-Edit-abliterated-checkpint_v1.2.safetensors"
+    assert stack["unet_name"] == "v1.2/dreamshaper_8.safetensors"
     graph = _workflow(stack, "hallway", {"steps": 8, "cfg": 2.5, "width": 512, "height": 512}, 1, "j")
     assert graph["4"]["inputs"]["ckpt_name"] == stack["unet_name"]
     choices = [
         "Qwen-Edit-abliterated-4step-v1.safetensors",
-        "v1.2\\Qwen-Edit-abliterated-checkpint_v1.2.safetensors",
+        "v1.2\\dreamshaper_8.safetensors",
     ]
     assert _match_comfy("model-1", choices) is None
     assert _match_comfy(stack["unet_name"], choices) == choices[1]
-    assert _comfy_rel(Path(rec["path"])).endswith("checkpint_v1.2.safetensors")
+    assert _comfy_rel(Path(rec["path"])).endswith("dreamshaper_8.safetensors")
+
+
+def test_box88_qwen_checkpoint_uses_external_clip(tmp_path, monkeypatch):
+    from eclipse.image_runtime import _workflow
+
+    models = tmp_path / "models"
+    ckpt = models / "checkpoints" / "Qwen-Edit-abliterated-4step-v1.safetensors"
+    vae = models / "vae" / "qwen_image_vae.safetensors"
+    clip = models / "text_encoders" / "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    ckpt.parent.mkdir(parents=True)
+    vae.parent.mkdir(parents=True)
+    clip.parent.mkdir(parents=True)
+    ckpt.write_bytes(b"u")
+    vae.write_bytes(b"v")
+    clip.write_bytes(b"c")
+    items = [
+        {"state": "ready", "handler": "vae", "path": str(vae), "name": vae.name},
+        {"state": "ready", "handler": "clip", "path": str(clip), "name": clip.name},
+    ]
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: items)
+    rec = {"name": ckpt.stem, "path": str(ckpt), "handler": "t2i", "modality": "image"}
+    stack = resolve_stack(rec)
+    assert stack["kind"] == "checkpoint"
+    assert stack["vae_name"] == vae.name
+    assert stack["clip_name"] == clip.name
+    graph = _workflow(stack, "hallway", {"steps": 4, "cfg": 1.0, "width": 512, "height": 512}, 1, "j")
+    assert graph["4"]["class_type"] == "CheckpointLoaderSimple"
+    assert graph["8"]["class_type"] == "CLIPLoader"
+    assert graph["8"]["inputs"]["type"] == "qwen_image"
+    assert graph["6"]["inputs"]["clip"] == ["8", 0]
 
 
 def test_box84_non_png_is_refused():
