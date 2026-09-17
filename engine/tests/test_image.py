@@ -204,6 +204,36 @@ def test_box86_seed_random_rolls(monkeypatch):
     assert job.get("payload", {}).get("seed") == 99 or session()["seed"] == 99
 
 
+def test_box87_nested_checkpoint_uses_comfy_rel(tmp_path, monkeypatch):
+    from eclipse.image_runtime import _comfy_rel, _match_comfy, _workflow
+
+    rec = {
+        "name": "model-1",
+        "path": str(
+            tmp_path
+            / "models"
+            / "checkpoints"
+            / "v1.2"
+            / "Qwen-Edit-abliterated-checkpint_v1.2.safetensors"
+        ),
+        "handler": "t2i",
+        "modality": "image",
+    }
+    monkeypatch.setattr("eclipse.image_runtime.list_items", lambda: [])
+    stack = resolve_stack(rec)
+    assert stack["kind"] == "checkpoint"
+    assert stack["unet_name"] == "v1.2/Qwen-Edit-abliterated-checkpint_v1.2.safetensors"
+    graph = _workflow(stack, "hallway", {"steps": 8, "cfg": 2.5, "width": 512, "height": 512}, 1, "j")
+    assert graph["4"]["inputs"]["ckpt_name"] == stack["unet_name"]
+    choices = [
+        "Qwen-Edit-abliterated-4step-v1.safetensors",
+        "v1.2\\Qwen-Edit-abliterated-checkpint_v1.2.safetensors",
+    ]
+    assert _match_comfy("model-1", choices) is None
+    assert _match_comfy(stack["unet_name"], choices) == choices[1]
+    assert _comfy_rel(Path(rec["path"])).endswith("checkpint_v1.2.safetensors")
+
+
 def test_box84_non_png_is_refused():
     IMAGE.set_stub(lambda *a: b"not a picture")
     rec = {"id": "x", "handler": "t2i", "modality": "image", "path": "/tmp/x.safetensors", "state": "ready"}

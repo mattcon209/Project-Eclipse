@@ -6,14 +6,17 @@ Local-first AI studio. **Atelier** (Galaxy S24+ APK) talks to a headless engine 
 
 Logged chats + GGUF text handler (Ollama if it’s running, else llama-cpp-python). Image **Make** runs the Qwen stack already on disk through local ComfyUI (`--lowvram`). No fake stills. Audio/Video/Talk are later.
 
-Library (Phase 1): paste-link acquire + Search this PC.
+Library: paste-link acquire + Search this PC.
 
-```bash
-pip install -r engine/requirements.txt
+On MattsGamingPC keep the repo **off OneDrive**:
+
+```bat
+cd /d C:\Project Eclipse
+git pull
 py run.py
 ```
 
-Or from `engine/`: `py run.py`. Binds `0.0.0.0:7740`.
+Binds `0.0.0.0:7740`. `run.bat` in the repo root does the same.
 
 Open `http://<pc>:7740` — Atelier lab UI (same look as the signed-off mockup). Pair with the 6-digit code printed in the terminal.
 

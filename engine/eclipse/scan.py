@@ -463,7 +463,15 @@ def _stale(rec: dict[str, Any]) -> bool:
         exists = False
     if not exists:
         return True
-    if rec.get("state") == "ready" or rec.get("managed"):
+    if rec.get("managed"):
+        return False
+    if rec.get("state") == "ready":
+        if p.is_file():
+            suf = p.suffix.lower()
+            if suf and suf not in WEIGHT_SUFFIXES and not _looks_gguf(p):
+                return True
+            if not suf and not _looks_gguf(p):
+                return True
         return False
     suf = p.suffix.lower() if p.is_file() else ""
     if rec.get("state") == "inbox" and suf and suf not in WEIGHT_SUFFIXES:

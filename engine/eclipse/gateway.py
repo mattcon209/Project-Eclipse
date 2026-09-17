@@ -298,7 +298,13 @@ def library_scan(body: ScanIn, authorization: str | None = Header(default=None))
 def library_search(body: SearchIn | None = None, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     extra = (body.extra if body else "") or ""
-    return scan_machine(extra=extra.strip() or None)
+    try:
+        return scan_machine(extra=extra.strip() or None)
+    except OSError as e:
+        raise HTTPException(
+            409,
+            "Couldn’t write the catalog (a file is locked). Search again. Nothing was faked. " + str(e),
+        ) from e
 
 
 @app.get("/api/library/{item_id}")

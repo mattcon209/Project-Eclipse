@@ -77,6 +77,7 @@ class ImageEngine:
         stack = resolve_stack(rec)
         self.impl = "comfy"
         _ensure_comfy()
+        stack = _bind_comfy_names(stack)
         self.loads += 1
         png = _comfy_run(stack, prompt, opts, seed, job_id, lambda: self._stop)
         path = _write_still(job_id, png)
@@ -95,8 +96,8 @@ IMAGE = ImageEngine()
 
 
 def resolve_stack(rec: dict[str, Any]) -> dict[str, str]:
-    unet_path = Path(rec.get("path") or rec.get("source") or "")
-    unet_name = unet_path.name if unet_path.name else str(rec.get("name") or "")
+    unet_path = _weight_file(Path(rec.get("path") or rec.get("source") or ""))
+    unet_name = _comfy_rel(unet_path) or unet_path.name or str(rec.get("name") or "")
     kind = _kind(rec, unet_path)
     if kind == "companion" or rec.get("handler") in {"vae", "clip", "lora"}:
         raise ImageError("Pick the diffusion model in Image, not a VAE / CLIP / LoRA.")
@@ -171,6 +172,114 @@ def _kind(rec: dict[str, Any], path: Path) -> str:
     return "checkpoint"
 
 
+def _weight_file(path: Path) -> Path:
+    if path.is_file() or not path.exists():
+        return path
+    if path.is_dir():
+        hits = sorted(path.rglob("*.safetensors")) + sorted(path.rglob("*.ckpt"))
+        if len(hits) == 1:
+            return hits[0]
+    return path
+
+
+def _comfy_rel(path: Path) -> str:
+    markers = {
+        "checkpoints",
+        "diffusion_models",
+        "unet",
+        "vae",
+        "text_encoders",
+        "text-encoders",
+        "clip",
+        "loras",
+    }
+    parts = path.parts
+    low = [p.lower() for p in parts]
+    for i, p in enumerate(low):
+        if p in markers and i + 1 < len(parts):
+            return "/".join(parts[i + 1 :])
+    return path.name
+
+
+def _comfy_choices(node: str, field: str) -> list[str]:
+    try:
+        info = _http("GET", f"{COMFY}/object_info/{node}", timeout=8)
+    except ImageError:
+        return []
+    block = info.get(node) or info
+    inp = ((block.get("input") or {}).get("required") or {}).get(field)
+    if isinstance(inp, list) and inp and isinstance(inp[0], list):
+        return [str(x) for x in inp[0]]
+    return []
+
+
+def _match_comfy(name: str, choices: list[str]) -> str | None:
+    if not name or not choices:
+        return None
+    n = name.replace("\\", "/")
+    for c in choices:
+        if c.replace("\\", "/") == n:
+            return c
+    base = Path(n).name.lower()
+    hits = [c for c in choices if Path(str(c).replace("\\", "/")).name.lower() == base]
+    if hits:
+        return hits[0]
+    stem = Path(base).stem.lower()
+    hits = [c for c in choices if Path(str(c).replace("\\", "/")).stem.lower() == stem]
+    return hits[0] if hits else None
+
+
+def _bind_comfy_names(stack: dict[str, str]) -> dict[str, str]:
+    out = dict(stack)
+    if stack.get("kind") == "checkpoint":
+        choices = _comfy_choices("CheckpointLoaderSimple", "ckpt_name")
+        matched = _match_comfy(stack.get("unet_name") or "", choices)
+        if choices and not matched:
+            shown = ", ".join(choices[:8]) or "(none)"
+            raise ImageError(
+                f"ComfyUI has no checkpoint named {stack.get('unet_name')}. "
+                f"It sees: {shown}. Pick one of those. Nothing was faked."
+            )
+        if matched:
+            out["unet_name"] = matched
+        return out
+    unets = _comfy_choices("UNETLoader", "unet_name")
+    matched = _match_comfy(stack.get("unet_name") or "", unets)
+    if unets and not matched:
+        shown = ", ".join(unets[:8]) or "(none)"
+        raise ImageError(
+            f"ComfyUI has no UNET named {stack.get('unet_name')}. "
+            f"It sees: {shown}. Pick one of those. Nothing was faked."
+        )
+    if matched:
+        out["unet_name"] = matched
+    vaes = _comfy_choices("VAELoader", "vae_name")
+    clips = _comfy_choices("CLIPLoader", "clip_name")
+    v = _match_comfy(stack.get("vae_name") or "", vaes)
+    c = _match_comfy(stack.get("clip_name") or "", clips)
+    if v:
+        out["vae_name"] = v
+    if c:
+        out["clip_name"] = c
+    return out
+
+
+def _short_comfy_err(err: Any) -> str:
+    if isinstance(err, dict):
+        nodes = err.get("node_errors") or {}
+        if isinstance(nodes, dict):
+            for node in nodes.values():
+                if not isinstance(node, dict):
+                    continue
+                for e in node.get("errors") or []:
+                    if isinstance(e, dict) and (e.get("details") or e.get("message")):
+                        return str(e.get("details") or e.get("message"))[:400]
+        inner = err.get("error")
+        if isinstance(inner, dict) and inner.get("message"):
+            return str(inner.get("message"))[:400]
+    return str(err)[:400]
+
+
 def _looks_handler(it: dict[str, Any], handler: str) -> bool:
     if it.get("handler") == handler or it.get("modality") == handler:
         return True
@@ -217,7 +326,7 @@ def _pick_name(
             if needle.lower() in low:
                 score = 100 - i
                 break
-        ranked.append((score, p.name))
+        ranked.append((score, _comfy_rel(p) or p.name))
     ranked.sort(key=lambda x: (-x[0], x[1]))
     return ranked[0][1] if ranked else None
 
@@ -263,7 +372,7 @@ def _comfy_run(
         raise ImageError(f"ComfyUI rejected the graph: {e}") from e
     err = queued.get("error") or queued.get("node_errors")
     if err:
-        raise ImageError(f"ComfyUI rejected the graph: {err}")
+        raise ImageError("ComfyUI rejected the graph: " + _short_comfy_err(err))
     pid = queued.get("prompt_id") or queued.get("promptId")
     if not pid:
         raise ImageError("ComfyUI did not return a prompt_id.")

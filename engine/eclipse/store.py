@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 import threading
 from pathlib import Path
 from typing import Any
@@ -23,7 +25,36 @@ class JsonStore:
                 return json.loads(json.dumps(self.default))
 
     def write(self, data: Any) -> None:
+        payload = json.dumps(data, indent=2)
         with self._lock:
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            tmp.replace(self.path)
+            _atomic_write(self.path, payload)
+
+
+def _atomic_write(path: Path, payload: str) -> None:
+    """Windows can deny replace() on a live json (AV, explorer preview). Retry, then overwrite."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    last: OSError | None = None
+    try:
+        for i in range(10):
+            try:
+                os.replace(tmp, path)
+                return
+            except OSError as e:
+                last = e
+                time.sleep(0.04 * (i + 1))
+        for i in range(6):
+            try:
+                path.write_text(payload, encoding="utf-8")
+                return
+            except OSError as e:
+                last = e
+                time.sleep(0.05 * (i + 1))
+        if last:
+            raise last
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
