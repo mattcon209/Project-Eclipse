@@ -29,7 +29,8 @@ from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
 from eclipse.image_runtime import IMAGE
-from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, set_seed, use_model
+from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, set_seed, start_train, use_model
+from eclipse.train_runtime import TRAIN, TrainError, probe_dataset
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -87,6 +88,17 @@ class MakeIn(BaseModel):
     enhance: bool = False
     edit: bool = False
     source: str | None = None
+
+
+class TrainProbeIn(BaseModel):
+    path: str = Field(default="", max_length=2000)
+
+
+class TrainIn(BaseModel):
+    base_id: str = Field(default="", max_length=40)
+    dataset: str = Field(default="", max_length=2000)
+    ladder: str = Field(default="balanced", max_length=20)
+    name: str = Field(default="", max_length=80)
 
 
 class AcquireIn(BaseModel):
@@ -216,6 +228,7 @@ def job(job_id: str, authorization: str | None = Header(default=None)) -> dict:
 def cancel(job_id: str, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     IMAGE.stop()
+    TRAIN.stop()
     j = job_cancel(job_id)
     if not j:
         raise HTTPException(404, "No such job.")
@@ -230,6 +243,7 @@ def job_delete(job_id: str, authorization: str | None = Header(default=None)) ->
         raise HTTPException(404, "No such job.")
     if existing.get("state") in {"running", "queued", "downloading"}:
         IMAGE.stop()
+        TRAIN.stop()
         job_cancel(job_id)
     j = job_remove(job_id)
     if not j:
@@ -276,7 +290,32 @@ def seed(body: SeedIn, authorization: str | None = Header(default=None)) -> dict
 @app.post("/api/make")
 def make(body: MakeIn, authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
-    return make_image(body.prompt.strip())
+    return make_image(
+        body.prompt.strip(),
+        enhance=body.enhance,
+        edit=body.edit,
+        source=body.source,
+    )
+
+
+@app.post("/api/train/probe")
+def train_probe(body: TrainProbeIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    try:
+        return probe_dataset(body.path.strip())
+    except TrainError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/train")
+def train_start(body: TrainIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return start_train(
+        body.base_id.strip(),
+        body.dataset.strip(),
+        ladder=body.ladder.strip() or "balanced",
+        name=body.name.strip(),
+    )
 
 
 @app.get("/api/kpis")

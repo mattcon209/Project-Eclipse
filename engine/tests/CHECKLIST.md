@@ -33,3 +33,4 @@ python -m pytest tests -v
 | 80–88 | Phase 3 stills: VAE/CLIP companions, stub PNG, unfiltered prompt, refuse non-PNG, AIO checkpoint, seed, nested ckpt names, Qwen hybrid CLIP | `test_image.py` |
 | 89 | Image canvas strip keeps stills; tap restores; no Gallery tab | `test_box89_*` |
 | 90–93 | Delete still PNG, Enhance next ladder, Qwen edit graph, SD img2img | `test_box90_*`–`test_box93_*` |
+| 94–100 | Phase 6 Train: probe folder, refuse Qwen/Flux, stub catalogs LoRA, production never fakes | `test_train.py` |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import time
+from pathlib import Path
 from typing import Any
 
 from eclipse.chats import append_turn, create_thread, get_thread, messages_for, save_thread, update_turn
@@ -10,11 +11,12 @@ import threading
 
 from eclipse.image_runtime import IMAGE, ImageError
 from eclipse.jobs import append_log, create as create_job, get as job_get, update as job_update
-from eclipse.library import get_item, register_card
+from eclipse.library import LIB, get_item, guess_vram_mb, register_card
 from eclipse.pass_through import unchanged
 from eclipse.resource_os import OS
 from eclipse.store import JsonStore
 from eclipse.text_runtime import ENGINE, TextError
+from eclipse.train_runtime import TRAIN, TrainError, probe_dataset, refuse_base, run_train
 
 GENERATION_MODES = {"image", "chat", "audio", "edit", "video", "talk", "train"}
 VIEW_MODES = {"home", "jobs", "library", "gallery", "more"}
@@ -466,3 +468,130 @@ def chat_send(
 def chat_stop() -> dict[str, Any]:
     ENGINE.stop()
     return {"ok": True}
+
+
+def start_train(
+    base_id: str,
+    dataset: str,
+    *,
+    ladder: str = "balanced",
+    name: str = "",
+) -> dict[str, Any]:
+    if ladder not in {"fast", "balanced", "quality", "max"}:
+        ladder = "balanced"
+    data = session()
+    if data.get("mode") != "train":
+        set_mode("train")
+        data = session()
+    rec = get_item(base_id) if base_id else None
+    if not rec and data.get("loaded"):
+        rec = get_item(str(data.get("loaded")))
+    title = (name or (rec or {}).get("name") or "lora")
+    title = (str(title) + " LoRA")[:80]
+    job = create_job(
+        "train",
+        title,
+        {
+            "base_id": (rec or {}).get("id"),
+            "dataset": dataset,
+            "ladder": ladder,
+            "name": name,
+        },
+    )
+    reason = refuse_base(rec)
+    if reason:
+        append_log(job["id"], reason, state="blocked", progress=0)
+        return get_job_safe(job["id"])
+    try:
+        info = probe_dataset(dataset)
+    except TrainError as e:
+        append_log(job["id"], str(e), state="blocked", progress=0)
+        return get_job_safe(job["id"])
+    register_card(rec)
+    sess = _state.read()
+    sess["loaded"] = rec["id"]
+    sess["loaded_name"] = rec.get("ollama_name") or rec.get("name")
+    by = dict(sess.get("by_mode") or {})
+    by["train"] = {"id": rec["id"], "name": sess["loaded_name"]}
+    sess["by_mode"] = by
+    _state.write(sess)
+    OS.enter_mode("train", rec["id"])
+    result = OS.run("train", ladder=ladder, job_id=job["id"])
+    if result.refused:
+        append_log(job["id"], result.refuse_reason or "Refused.", state="blocked", progress=0)
+        return get_job_safe(job["id"])
+    if result.queued:
+        append_log(job["id"], "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return get_job_safe(job["id"])
+    append_log(job["id"], f"first_byte · {info['notes']}", state="running", progress=1)
+    args = (job["id"], rec, dataset, ladder, name)
+    if TRAIN._stub is not None:
+        _run_train(*args)
+    else:
+        threading.Thread(target=_run_train, args=args, daemon=True).start()
+    return get_job_safe(job["id"])
+
+
+def _run_train(
+    job_id: str,
+    rec: dict[str, Any],
+    dataset: str,
+    ladder: str,
+    name: str,
+) -> None:
+    if not OS.begin_heavy(job_id):
+        append_log(job_id, "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return
+    try:
+
+        def log(line: str) -> None:
+            append_log(job_id, line, state="running")
+
+        out = run_train(rec, dataset, ladder=ladder, name=name, job_id=job_id, log=log)
+        path = Path(out["path"])
+        rec_l = _catalog_lora(path, path.stem, job_id)
+        job_update(job_id, artifact=str(path), error=None)
+        append_log(
+            job_id,
+            f"LoRA {rec_l.get('name')} · {out.get('impl')} · {out.get('steps')} steps · library {rec_l.get('state')}",
+            state="done",
+            progress=100,
+        )
+    except TrainError as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    except Exception as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    finally:
+        OS.end_heavy(job_id)
+
+
+def _catalog_lora(path: Path, name: str, job_id: str) -> dict[str, Any]:
+    from eclipse import library as library_mod
+    from eclipse.detect import sniff
+
+    path = Path(path)
+    info = sniff(path)
+    rec = {
+        "name": name or info.get("name") or path.stem,
+        "path": str(path.resolve()) if path.exists() else str(path),
+        "bytes": path.stat().st_size if path.is_file() else 0,
+        "managed": True,
+        "state": "ready" if info.get("known") else "inbox",
+        "format": info.get("format") or "safetensors",
+        "modality": info.get("modality") or "lora",
+        "handler": info.get("handler") or "lora",
+        "notes": info.get("notes") or "Trained LoRA.",
+        "job_id": job_id,
+        "source": "train",
+        "vram_balanced_mb": 0,
+    }
+    if rec["state"] != "ready":
+        rec["notes"] = (rec["notes"] or "") + " Inbox until identified. Nothing marked Ready."
+    else:
+        rec["vram_balanced_mb"] = guess_vram_mb("lora", int(rec.get("bytes") or 0))
+    saved = library_mod.LIB.add(rec)
+    if saved.get("state") == "ready":
+        register_card(saved)
+    return saved

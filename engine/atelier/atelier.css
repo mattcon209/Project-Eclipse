@@ -240,6 +240,13 @@ body { height: 100dvh; max-height: 100dvh; overflow: hidden; }
 #task-mode { flex: 0 0 72px; width: 72px; }
 #chat-model { flex: 1 1 auto; min-width: 0; }
 #image-model { flex: 1 1 auto; min-width: 0; width: 100%; }
+#train-base { flex: 1 1 auto; min-width: 0; width: 100%; }
+#train-name {
+  flex: 1 1 auto; min-width: 0;
+  background: transparent; border: 0; outline: none;
+  color: var(--text); font: 13.5px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+#train-notes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-thread {
   flex: 0 0 auto; border: 1px solid var(--line); background: transparent; color: var(--mute);
   font-size: 10px; letter-spacing: .08em; padding: 6px 10px; border-radius: 99px;

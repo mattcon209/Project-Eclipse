@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#070708" />
   <title>Atelier</title>
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/atelier.css?v=16" />
+  <link rel="stylesheet" href="/atelier.css?v=17" />
 </head>
 <body>
   <div id="app">
@@ -61,11 +61,11 @@
             <h3 id="jobs-count">0 jobs</h3>
             <p>nothing running</p>
           </button>
-          <div class="tile">
-            <div class="t">Disk</div>
-            <h3 id="disk-line">—</h3>
-            <p id="ram-line">RAM —</p>
-          </div>
+          <button class="tile" data-go="train" type="button">
+            <div class="t">Train</div>
+            <h3>LoRA</h3>
+            <p>folder of stills</p>
+          </button>
         </div>
       </div>
 
@@ -118,6 +118,7 @@
           <select id="task-mode" class="pick" aria-label="Mode">
             <option value="chat">Chat</option>
             <option value="image">Image</option>
+            <option value="train">Train</option>
             <option value="audio">Audio</option>
             <option value="video">Video</option>
             <option value="talk">Talk</option>
@@ -158,6 +159,36 @@
         </div>
       </div>
 
+      <div id="screen-train" class="screen">
+        <p class="kicker">Train</p>
+        <p class="lede">Folder of stills + a Ready SD / SDXL checkpoint. Captions from a matching .txt or the file name. <button class="q" id="q-train" type="button" aria-label="How does Train work?">?</button></p>
+        <div class="ladder">
+          <button class="lad" data-l="fast">Fast</button>
+          <button class="lad on" data-l="balanced">Balanced</button>
+          <button class="lad" data-l="quality">Quality</button>
+          <button class="lad" data-l="max">Max</button>
+        </div>
+        <div class="prompt">
+          <textarea id="train-dataset" rows="2" placeholder="C:\photos\hollow-refs"></textarea>
+          <div class="prompt-row">
+            <span class="meta grow" id="train-notes">paste a folder · png / jpg / webp</span>
+            <button class="ghost" id="train-probe" type="button">Probe</button>
+          </div>
+          <div class="prompt-row">
+            <span class="meta grow">
+              <select id="train-base" class="pick" aria-label="Base checkpoint">
+                <option value="">base checkpoint…</option>
+              </select>
+            </span>
+          </div>
+          <div class="prompt-row">
+            <input id="train-name" type="text" placeholder="name (optional)" autocomplete="off" aria-label="LoRA name" />
+            <button class="make" id="train-start" type="button">Start</button>
+          </div>
+          <p class="err" id="train-err"></p>
+        </div>
+      </div>
+
       <div id="screen-library" class="screen">
         <p class="kicker">Library</p>
         <p class="lede">Paste a link to download, or search the PC for models already on disk. <button class="q" id="q-paste" type="button" aria-label="How does paste-install work?">?</button></p>
@@ -191,6 +222,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=16"></script>
+  <script src="/app.js?v=17"></script>
 </body>
 </html>

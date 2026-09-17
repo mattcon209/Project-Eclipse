@@ -33,6 +33,9 @@ STATIC_BUTTON_IDS = [
     "q-model",
     "edit",
     "enhance",
+    "train-probe",
+    "train-start",
+    "q-train",
 ]
 
 
@@ -75,6 +78,8 @@ def test_box57_js_api_paths_exist_on_gateway():
         ("/api/chats", "get"),
         ("/api/personas", "get"),
         ("/api/jobs/x", "delete"),
+        ("/api/train", "post"),
+        ("/api/train/probe", "post"),
     ):
         fn = getattr(client, method)
         body = {} if method == "post" else None
@@ -140,6 +145,12 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     # No extra Audio/Video tabs in the nav — Mode dropdown on Chat instead.
     assert HTML.count('data-m="audio"') == 0
     assert HTML.count('data-m="video"') == 0
+    assert HTML.count('data-m="train"') == 0
+    assert 'id="screen-train"' in HTML
+    assert 'value="train"' in HTML
+    assert 'data-go="train"' in HTML
+    assert "/api/train" in JS
+    assert "/api/train/probe" in JS
     assert "Phase 4" in JS and "Phase 7" in JS and "Phase 5" in JS
     assert "Nothing was faked" in JS
 

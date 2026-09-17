@@ -27,6 +27,10 @@ const helpCopy = {
     title: "Model on this tab",
     body: "Sorted by what the tab does. Chat remembers the last text model; Image remembers the last picture model. Switching Qwen3 Chat → Image already has the T2I pick. Search this PC if a weight is on disk but missing here.",
   },
+  train: {
+    title: "Train LoRA",
+    body: "A folder of pictures on this PC — files stay put. Matching .txt files are captions; otherwise the file name is the caption. Fast is 200 steps / rank 8. Balanced 800 / 16. Quality 1500 / 32 at 768. Max 2500. Needs kohya_ss or diffusers+peft. Never writes a fake LoRA.",
+  },
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -102,7 +106,7 @@ function applyStatus(s) {
     : `Engine live on ${s.resources?.hostname || "this box"} · GPU not visible here (will be on MattsGamingPC)`;
   $("#resume-line").textContent = mode ? mode + " still selected" : "tap Image to enter a mode";
   const resume = $("#resume-tile");
-  if (resume && mode && ["image", "chat", "audio", "edit", "video", "talk"].includes(mode)) {
+  if (resume && mode && ["image", "chat", "audio", "edit", "video", "talk", "train"].includes(mode)) {
     resume.dataset.go = mode;
     const rh = $("#resume-mode");
     if (rh) rh.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
@@ -114,8 +118,8 @@ function applyStatus(s) {
   if (hostEl) hostEl.textContent = s.resources?.hostname || "—";
   const gpuEl = $("#gpu-line");
   if (gpuEl) gpuEl.textContent = gpu.available ? gpu.name : "no nvidia-smi in this lab";
-  $("#disk-line").textContent = disk.free_gb != null ? disk.free_gb + " GB free" : "—";
-  $("#ram-line").textContent = ram.total_mb ? Math.round(ram.used_mb / 1024 * 10) / 10 + " / " + Math.round(ram.total_mb / 1024 * 10) / 10 + " GB" : "RAM —";
+  if ($("#disk-line")) $("#disk-line").textContent = disk.free_gb != null ? disk.free_gb + " GB free" : "—";
+  if ($("#ram-line")) $("#ram-line").textContent = ram.total_mb ? Math.round(ram.used_mb / 1024 * 10) / 10 + " / " + Math.round(ram.total_mb / 1024 * 10) / 10 + " GB" : "RAM —";
   const lad = s.session?.ladder || "balanced";
   document.querySelectorAll(".lad").forEach((b) => b.classList.toggle("on", b.dataset.l === lad));
   if (!currentStill) {
@@ -183,7 +187,7 @@ $("#pair-btn").addEventListener("click", async () => {
 function go(m) {
   const tab = m === "audio" || m === "video" || m === "talk" ? "chat" : (m === "edit" ? "image" : m);
   document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === tab));
-  ["home", "image", "chat", "library", "jobs"].forEach((id) => {
+  ["home", "image", "chat", "library", "jobs", "train"].forEach((id) => {
     const el = $("#screen-" + id);
     if (el) el.classList.toggle("on", id === tab);
   });
@@ -205,7 +209,7 @@ document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click"
 
 function applyTaskSurface(m) {
   const tm = $("#task-mode");
-  if (tm && (m === "chat" || m === "image" || m === "edit" || LATER[m])) tm.value = m === "edit" ? "image" : m;
+  if (tm && (m === "chat" || m === "image" || m === "edit" || m === "train" || LATER[m])) tm.value = m === "edit" ? "image" : m;
   const later = $("#later-empty");
   const log = $("#chat-log");
   const threads = $("#chat-threads");
@@ -252,6 +256,21 @@ function fillPicks() {
     }).join("");
     if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;
   }
+  const base = $("#train-base");
+  if (base) {
+    const pics = ready.filter((i) => {
+      if (i.handler === "vae" || i.handler === "clip" || i.handler === "lora") return false;
+      if (i.modality === "vae" || i.modality === "clip" || i.modality === "lora" || i.modality === "text") return false;
+      return i.handler === "t2i" || i.modality === "image";
+    });
+    const cur = (by.train && by.train.id) || (mode === "train" ? loaded : "") || (by.image && by.image.id) || base.value;
+    base.innerHTML = '<option value="">base checkpoint…</option>' + pics.map((i) => {
+      const file = (i.path || "").split(/[\\/]/).pop() || "";
+      const label = (file && file.includes(".")) ? file : (i.name || file);
+      return `<option value="${escapeHtml(i.id)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    if (cur && [...base.options].some((o) => o.value === cur)) base.value = cur;
+  }
 }
 
 function syncPicks() {
@@ -268,6 +287,11 @@ function syncPicks() {
   if (img && img.options.length) {
     const id = (by.image && by.image.id) || (sess.mode === "image" ? loaded : "");
     if (id && [...img.options].some((o) => o.value === id)) img.value = id;
+  }
+  const base = $("#train-base");
+  if (base && base.options.length) {
+    const id = (by.train && by.train.id) || (sess.mode === "train" ? loaded : "") || (by.image && by.image.id);
+    if (id && [...base.options].some((o) => o.value === id)) base.value = id;
   }
 }
 
@@ -387,6 +411,58 @@ async function runMake(extra) {
 }
 
 $("#make").addEventListener("click", () => runMake({}));
+
+async function probeTrain() {
+  const err = $("#train-err");
+  const notes = $("#train-notes");
+  if (err) err.textContent = "";
+  const path = ($("#train-dataset") && $("#train-dataset").value.trim()) || "";
+  const btn = $("#train-probe");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api("/api/train/probe", { method: "POST", body: JSON.stringify({ path }) });
+    if (notes) notes.textContent = r.notes || "";
+  } catch (e) {
+    if (err) err.textContent = e.message || "Probe failed.";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function runTrain() {
+  const err = $("#train-err");
+  if (err) err.textContent = "";
+  const dataset = ($("#train-dataset") && $("#train-dataset").value.trim()) || "";
+  const base_id = ($("#train-base") && $("#train-base").value) || "";
+  const name = ($("#train-name") && $("#train-name").value.trim()) || "";
+  const ladder = (lastStatus && lastStatus.session && lastStatus.session.ladder) || "balanced";
+  const start = $("#train-start");
+  const probe = $("#train-probe");
+  if (start) start.disabled = true;
+  if (probe) probe.disabled = true;
+  try {
+    let job = await api("/api/train", { method: "POST", body: JSON.stringify({ base_id, dataset, ladder, name }) });
+    if (err) err.textContent = (job.log && job.log[job.log.length - 1] && job.log[job.log.length - 1].line) || "";
+    for (let i = 0; i < 1800; i++) {
+      if (job.state === "blocked" || job.state === "cancelled" || job.state === "done") break;
+      await new Promise((r) => setTimeout(r, 1000));
+      job = await api("/api/jobs/" + job.id);
+      if (err && job.log && job.log.length) err.textContent = job.log[job.log.length - 1].line || "";
+    }
+    if (job.state === "done" && job.artifact && err) err.textContent = (job.log && job.log[job.log.length - 1] && job.log[job.log.length - 1].line) || "LoRA in Library.";
+    if (job.state !== "done" && err && !err.textContent) err.textContent = "Train finished without a LoRA. Nothing was faked.";
+    await refreshJobs();
+    await refreshLibrary();
+  } catch (e) {
+    if (err) err.textContent = e.message || "Train failed.";
+  } finally {
+    if (start) start.disabled = false;
+    if (probe) probe.disabled = false;
+  }
+}
+
+if ($("#train-probe")) $("#train-probe").addEventListener("click", () => probeTrain());
+if ($("#train-start")) $("#train-start").addEventListener("click", () => runTrain());
 if ($("#edit")) {
   $("#edit").addEventListener("click", () => {
     if (!currentStill) return;
@@ -931,6 +1007,12 @@ if ($("#q-model")) {
     openHelp("model");
   });
 }
+if ($("#q-train")) {
+  $("#q-train").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openHelp("train");
+  });
+}
 if ($("#chat-find")) {
   $("#chat-find").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -979,6 +1061,8 @@ onEnter("#pair-input", "#pair-btn");
 onEnter("#lib-url", "#lib-add");
 onEnter("#prompt", "#make");
 onEnter("#chat-input", "#chat-send");
+onEnter("#train-dataset", "#train-probe");
+onEnter("#train-name", "#train-start");
 
 boot().catch((e) => {
   $("#pair-hint").textContent = "Cannot reach the engine. Is it running on this LAN?";
