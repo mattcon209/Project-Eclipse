@@ -348,3 +348,24 @@ def test_box111_video_max_fits_16gb():
     r.register(ModelCard("wan", "video", vram_balanced_mb=vram, size_bytes=6_000_000_000))
     est = r.estimate("wan", "max")
     assert est.fits is True, est.reason
+
+
+def test_box112_wan22_i2v_locks_still():
+    w = {
+        "family": "wan",
+        "kind": "unet",
+        "unet_name": "wan2.2_ti2v_5B_fp16.safetensors",
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "vae_name": "wan2.2_vae.safetensors",
+        "dtype": "default",
+        "image": "eclipse-j.png",
+    }
+    g = _workflow(w, "the door eases open", LADDER["balanced"], 1, "j")
+    assert g["5"]["class_type"] == "WanImageToVideo"
+    assert g["5"]["inputs"]["start_image"] == ["42", 0]
+    assert g["42"]["class_type"] == "ImageScale"
+    assert g["67"]["class_type"] == "ModelSamplingSD3"
+    assert g["67"]["inputs"]["shift"] == 8.0
+    assert g["3"]["inputs"]["model"] == ["67", 0]
+    assert g["3"]["inputs"]["positive"] == ["5", 0]
+    assert g["3"]["inputs"]["latent_image"] == ["5", 2]

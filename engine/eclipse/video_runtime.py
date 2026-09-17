@@ -112,7 +112,11 @@ class VideoEngine:
         _ensure_comfy()
         stack = _bind_video_names(stack)
         if source_path:
-            stack["image"] = _stage_image(Path(source_path), job_id)
+            src = Path(source_path)
+            stack["image"] = _stage_image(src, job_id)
+            iw, ih = _still_size(src)
+            if iw and ih:
+                opts["width"], opts["height"] = _contain_wh(iw, ih, int(opts["width"]), int(opts["height"]), 32)
         self.loads += 1
         blob = _comfy_clip(stack, prompt, opts, seed, job_id, lambda: self._stop)
         path = _write_clip(job_id, blob)
@@ -248,6 +252,8 @@ def _video_stack(rec: dict[str, Any], family: str) -> dict[str, str]:
     stack["clip_path"] = str(clip_p) if clip_p else ""
     stack["vae_name"] = (_comfy_rel(vae_p) or vae_p.name) if vae_p else ""
     stack["vae_path"] = str(vae_p) if vae_p else ""
+    vis = _beside_file(unet_path, "clip_vision", ("clip_vision_h", "clip-vision-h", "xlm-roberta", "open-clip", "clip_vision"))
+    stack["clip_vision_name"] = (_comfy_rel(vis) or vis.name) if vis else ""
     if not stack["clip_name"] or not stack["vae_name"]:
         raise VideoError(
             "Wan needs umt5 in text_encoders and a Wan VAE in vae (not taesdxl). "
@@ -529,6 +535,32 @@ def _hunyuan_graph(
     return graph
 
 
+def _wan_22(stack: dict[str, str]) -> bool:
+    blob = ((stack.get("unet_name") or "") + " " + (stack.get("family") or "")).lower().replace("_", "-")
+    return "wan2.2" in blob or "wan-2.2" in blob or "ti2v" in blob
+
+
+def _still_size(path: Path) -> tuple[int, int] | None:
+    try:
+        data = Path(path).read_bytes()[:64]
+    except OSError:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+        import struct
+
+        w, h = struct.unpack(">II", data[16:24])
+        if w > 0 and h > 0:
+            return int(w), int(h)
+    return None
+
+
+def _contain_wh(iw: int, ih: int, mw: int, mh: int, step: int) -> tuple[int, int]:
+    scale = min(mw / max(iw, 1), mh / max(ih, 1))
+    w = max(step, int(iw * scale) // step * step)
+    h = max(step, int(ih * scale) // step * step)
+    return w, h
+
+
 def _wan_graph(
     stack: dict[str, str],
     prompt: str,
@@ -539,6 +571,7 @@ def _wan_graph(
     n: int,
     save: dict[str, Any],
 ) -> dict[str, Any]:
+    model_ref: list[Any] = ["4", 0]
     graph: dict[str, Any] = {
         "4": {
             "class_type": "UNETLoader",
@@ -554,10 +587,10 @@ def _wan_graph(
                 "seed": int(seed) % (2**32),
                 "steps": int(opts["steps"]),
                 "cfg": float(opts["cfg"]),
-                "sampler_name": "euler",
+                "sampler_name": "uni_pc" if _wan_22(stack) else "euler",
                 "scheduler": "simple",
                 "denoise": 1.0,
-                "model": ["4", 0],
+                "model": model_ref,
                 "positive": ["6", 0],
                 "negative": ["7", 0],
                 "latent_image": ["5", 0],
@@ -566,21 +599,45 @@ def _wan_graph(
         "10": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["9", 0]}},
         "11": save,
     }
+    if _wan_22(stack):
+        graph["67"] = {
+            "class_type": "ModelSamplingSD3",
+            "inputs": {"shift": 8.0, "model": ["4", 0]},
+        }
+        graph["3"]["inputs"]["model"] = ["67", 0]
     if stack.get("image"):
         graph["41"] = {"class_type": "LoadImage", "inputs": {"image": stack["image"]}}
-        graph["5"] = {
-            "class_type": "WanImageToVideo",
+        graph["42"] = {
+            "class_type": "ImageScale",
             "inputs": {
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "vae": ["9", 0],
+                "image": ["41", 0],
+                "upscale_method": "area",
                 "width": w,
                 "height": h,
-                "length": n,
-                "batch_size": 1,
-                "start_image": ["41", 0],
+                "crop": "center",
             },
         }
+        i2v_inputs: dict[str, Any] = {
+            "positive": ["6", 0],
+            "negative": ["7", 0],
+            "vae": ["9", 0],
+            "width": w,
+            "height": h,
+            "length": n,
+            "batch_size": 1,
+            "start_image": ["42", 0],
+        }
+        if stack.get("clip_vision_name"):
+            graph["40"] = {
+                "class_type": "CLIPVisionLoader",
+                "inputs": {"clip_name": stack["clip_vision_name"]},
+            }
+            graph["43"] = {
+                "class_type": "CLIPVisionEncode",
+                "inputs": {"clip_vision": ["40", 0], "image": ["42", 0], "crop": "center"},
+            }
+            i2v_inputs["clip_vision_output"] = ["43", 0]
+        graph["5"] = {"class_type": "WanImageToVideo", "inputs": i2v_inputs}
         graph["3"]["inputs"]["positive"] = ["5", 0]
         graph["3"]["inputs"]["negative"] = ["5", 1]
         graph["3"]["inputs"]["latent_image"] = ["5", 2]
