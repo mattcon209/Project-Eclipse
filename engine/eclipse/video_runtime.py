@@ -95,6 +95,9 @@ class VideoEngine:
         wan22 = family == "wan" and ("wan2.2" in blob or "wan-2.2" in blob or "ti2v" in blob)
         if wan22 and source_path:
             opts["cfg"] = 3.5
+            opts["steps"] = max(int(opts["steps"]), 16)
+        elif wan22:
+            opts["cfg"] = max(float(opts["cfg"]), 4.5)
         elif family == "wan":
             opts["cfg"] = max(float(opts["cfg"]), 4.0)
         if self._stub is not None:
@@ -122,8 +125,9 @@ class VideoEngine:
             if iw and ih:
                 opts["width"], opts["height"] = _contain_wh(iw, ih, int(opts["width"]), int(opts["height"]), 32)
             if wan22:
-                # 5B TI2V VAE falls apart below ~640; 384 looks like chroma soup on frame 0.
-                opts["width"], opts["height"] = _min_side(int(opts["width"]), int(opts["height"]), 640, 32)
+                # 5B TI2V VAE wants >=640 and step 16. Clamp max so min_side cannot OOM 16GB.
+                opts["width"], opts["height"] = _min_side(int(opts["width"]), int(opts["height"]), 640, 16)
+                opts["width"], opts["height"] = _max_side(int(opts["width"]), int(opts["height"]), 768, 16)
         self.loads += 1
         blob = _comfy_clip(stack, prompt, opts, seed, job_id, lambda: self._stop)
         path = _write_clip(job_id, blob)
@@ -137,6 +141,7 @@ class VideoEngine:
             "frames": opts["frames"],
             "family": family,
             "unet": stack.get("unet_name"),
+            "vae": stack.get("vae_name"),
         }
 
 
@@ -174,6 +179,8 @@ def refuse_pair(rec: dict[str, Any], source_path: str | None) -> str | None:
         if not i2v and i2v_only:
             return "This Hunyuan file is I2V. Put a still on the strip, then Make. Nothing was faked."
     if any(x in blob for x in ("wan2", "wan-2", "wan21", "wan22")):
+        if "14b" in blob and "ti2v" not in blob:
+            return "Wan 2.2 14B needs the high+low pair. Use 5B TI2V on this 16 GB card. Nothing was faked."
         t2v_only = "t2v" in blob and "i2v" not in blob and "ti2v" not in blob
         i2v_only = "i2v" in blob and "t2v" not in blob and "ti2v" not in blob
         if i2v and t2v_only:
@@ -578,6 +585,16 @@ def _min_side(w: int, h: int, floor: int, step: int) -> tuple[int, int]:
     return w, h
 
 
+def _max_side(w: int, h: int, ceil: int, step: int) -> tuple[int, int]:
+    m = max(w, h)
+    if m <= ceil:
+        return w, h
+    scale = ceil / max(m, 1)
+    w = max(step, int(w * scale) // step * step)
+    h = max(step, int(h * scale) // step * step)
+    return w, h
+
+
 def _wan_graph(
     stack: dict[str, str],
     prompt: str,
@@ -637,30 +654,47 @@ def _wan_graph(
                 "crop": "center",
             },
         }
-        i2v_inputs: dict[str, Any] = {
-            "positive": ["6", 0],
-            "negative": ["7", 0],
-            "vae": ["9", 0],
-            "width": w,
-            "height": h,
-            "length": n,
-            "batch_size": 1,
-            "start_image": ["42", 0],
-        }
-        if stack.get("clip_vision_name") and not _wan_22(stack):
-            graph["40"] = {
-                "class_type": "CLIPVisionLoader",
-                "inputs": {"clip_name": stack["clip_vision_name"]},
+        if _wan_22(stack):
+            # Official 5B TI2V I2V: image lives in the 2.2 latent, not Wan 2.1 conditioning.
+            graph["5"] = {
+                "class_type": "Wan22ImageToVideoLatent",
+                "inputs": {
+                    "vae": ["9", 0],
+                    "width": w,
+                    "height": h,
+                    "length": n,
+                    "batch_size": 1,
+                    "start_image": ["42", 0],
+                },
             }
-            graph["43"] = {
-                "class_type": "CLIPVisionEncode",
-                "inputs": {"clip_vision": ["40", 0], "image": ["42", 0]},
+            graph["3"]["inputs"]["positive"] = ["6", 0]
+            graph["3"]["inputs"]["negative"] = ["7", 0]
+            graph["3"]["inputs"]["latent_image"] = ["5", 0]
+        else:
+            i2v_inputs: dict[str, Any] = {
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "vae": ["9", 0],
+                "width": w,
+                "height": h,
+                "length": n,
+                "batch_size": 1,
+                "start_image": ["42", 0],
             }
-            i2v_inputs["clip_vision_output"] = ["43", 0]
-        graph["5"] = {"class_type": "WanImageToVideo", "inputs": i2v_inputs}
-        graph["3"]["inputs"]["positive"] = ["5", 0]
-        graph["3"]["inputs"]["negative"] = ["5", 1]
-        graph["3"]["inputs"]["latent_image"] = ["5", 2]
+            if stack.get("clip_vision_name"):
+                graph["40"] = {
+                    "class_type": "CLIPVisionLoader",
+                    "inputs": {"clip_name": stack["clip_vision_name"]},
+                }
+                graph["43"] = {
+                    "class_type": "CLIPVisionEncode",
+                    "inputs": {"clip_vision": ["40", 0], "image": ["42", 0]},
+                }
+                i2v_inputs["clip_vision_output"] = ["43", 0]
+            graph["5"] = {"class_type": "WanImageToVideo", "inputs": i2v_inputs}
+            graph["3"]["inputs"]["positive"] = ["5", 0]
+            graph["3"]["inputs"]["negative"] = ["5", 1]
+            graph["3"]["inputs"]["latent_image"] = ["5", 2]
     else:
         graph["5"] = {
             "class_type": "EmptyHunyuanLatentVideo",

@@ -425,7 +425,8 @@ def _run_video(
         job_update(job_id, artifact=out.get("path"), error=None)
         append_log(
             job_id,
-            f"clip {out.get('width')} · {out.get('frames')}f · {out.get('steps')} steps · seed {seed} · {out.get('impl')}",
+            f"clip {out.get('width')} · {out.get('frames')}f · {out.get('steps')} steps · seed {seed} · {out.get('impl')}"
+            + (f" · vae {out.get('vae')}" if out.get("vae") else ""),
             state="done",
             progress=100,
         )
