@@ -80,6 +80,7 @@ def test_box57_js_api_paths_exist_on_gateway():
         ("/api/jobs/x", "delete"),
         ("/api/train", "post"),
         ("/api/train/probe", "post"),
+        ("/api/video", "post"),
     ):
         fn = getattr(client, method)
         body = {} if method == "post" else None
@@ -151,7 +152,10 @@ def test_box70_per_tab_model_picks_and_chat_scroll():
     assert 'data-go="train"' in HTML
     assert "/api/train" in JS
     assert "/api/train/probe" in JS
-    assert "Phase 4" in JS and "Phase 7" in JS and "Phase 5" in JS
+    assert "Phase 4" in JS and "Phase 5" in JS
+    assert "Video handler is Phase 7" not in JS
+    assert 'id="clip"' in HTML
+    assert 'kind === "video"' in JS
     assert "Nothing was faked" in JS
 
 

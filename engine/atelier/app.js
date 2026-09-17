@@ -5,7 +5,7 @@ const HELP_KEY = "eclipse-help-hidden";
 const helpCopy = {
   ladder: {
     title: "Quality ladder",
-    body: "Four rungs, one control. Fast is a sketch. Balanced is the daily driver. Quality keeps it. Max is queued and slower. Tap Enhance on a Fast still to promote it without retyping.",
+    body: "Four rungs, one control. Fast is a sketch. Balanced is the daily driver. Quality keeps it. Max is queued and slower. Tap Enhance on a Fast still to promote it without retyping. On Video the rungs are short clips on 16 GB: Fast 9 frames, Balanced 17, Quality 25, Max 33.",
   },
   seed: {
     title: "Seed",
@@ -25,7 +25,7 @@ const helpCopy = {
   },
   model: {
     title: "Model on this tab",
-    body: "Sorted by what the tab does. Chat remembers the last text model; Image remembers the last picture model. Switching Qwen3 Chat → Image already has the T2I pick. Search this PC if a weight is on disk but missing here.",
+    body: "Sorted by what the tab does. Chat remembers the last text model; Image remembers the last picture model. Video models sit in the same Image list — Make is a clip. A still on the strip is photo-to-video. Search this PC if a weight is on disk but missing here.",
   },
   train: {
     title: "Train LoRA",
@@ -43,7 +43,6 @@ let stripUrls = [];
 
 const LATER = {
   audio: ["Audio", "Audio handler is Phase 4. Nothing was faked."],
-  video: ["Video", "Video handler is Phase 7. Nothing was faked."],
   talk: ["Talk", "Talk handler is Phase 5. Nothing was faked."],
 };
 
@@ -185,7 +184,7 @@ $("#pair-btn").addEventListener("click", async () => {
 });
 
 function go(m) {
-  const tab = m === "audio" || m === "video" || m === "talk" ? "chat" : (m === "edit" ? "image" : m);
+  const tab = m === "audio" || m === "talk" ? "chat" : (m === "edit" || m === "video" ? "image" : m);
   document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("on", b.dataset.m === tab));
   ["home", "image", "chat", "library", "jobs", "train"].forEach((id) => {
     const el = $("#screen-" + id);
@@ -209,7 +208,7 @@ document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click"
 
 function applyTaskSurface(m) {
   const tm = $("#task-mode");
-  if (tm && (m === "chat" || m === "image" || m === "edit" || m === "train" || LATER[m])) tm.value = m === "edit" ? "image" : m;
+  if (tm && (m === "chat" || m === "image" || m === "edit" || m === "train" || m === "video" || LATER[m])) tm.value = m === "edit" ? "image" : m;
   const later = $("#later-empty");
   const log = $("#chat-log");
   const threads = $("#chat-threads");
@@ -224,6 +223,13 @@ function applyTaskSurface(m) {
     if ($("#later-title")) $("#later-title").textContent = pair[0];
     if ($("#later-body")) $("#later-body").textContent = pair[1];
   }
+  const videoOn = m === "video";
+  if ($("#canvas-empty-title")) $("#canvas-empty-title").textContent = videoOn ? "No clip yet" : "No still yet";
+  if ($("#canvas-empty-body")) $("#canvas-empty-body").textContent = videoOn
+    ? "Pick LTXV / Hunyuan / Wan, then Make. A still on the strip becomes photo-to-video. Prompt is unchanged."
+    : "Pick an image model, then Make. Prompt is sent unchanged.";
+  const ta = $("#prompt");
+  if (ta && document.activeElement !== ta) ta.placeholder = videoOn ? "a clip from the game…" : "a still from the game…";
 }
 
 function fillPicks() {
@@ -248,10 +254,10 @@ function fillPicks() {
       if (n.includes("text-encoder") || n.includes("/clip/") || n.includes("qwen-2.5-vl") || n.includes("qwen2.5-vl")) return false;
       return i.handler === "t2i" || i.modality === "image" || i.modality === "video";
     });
-    const cur = (by.image && by.image.id) || (mode === "image" ? loaded : "") || img.value;
+    const cur = (mode === "video" ? ((by.video && by.video.id) || loaded) : ((by.image && by.image.id) || (mode === "image" ? loaded : ""))) || img.value;
     img.innerHTML = '<option value="">image model…</option>' + pics.map((i) => {
       const file = (i.path || "").split(/[\\/]/).pop() || "";
-      const label = (file && file.includes(".")) ? file : (i.name || file);
+      const label = ((i.modality === "video" || i.handler === "t2v") ? "clip · " : "") + ((file && file.includes(".")) ? file : (i.name || file));
       return `<option value="${escapeHtml(i.id)}">${escapeHtml(label)}</option>`;
     }).join("");
     if (cur && [...img.options].some((o) => o.value === cur)) img.value = cur;
@@ -285,7 +291,7 @@ function syncPicks() {
   }
   const img = $("#image-model");
   if (img && img.options.length) {
-    const id = (by.image && by.image.id) || (sess.mode === "image" ? loaded : "");
+    const id = (sess.mode === "video" ? ((by.video && by.video.id) || loaded) : ((by.image && by.image.id) || (sess.mode === "image" ? loaded : "")));
     if (id && [...img.options].some((o) => o.value === id)) img.value = id;
   }
   const base = $("#train-base");
@@ -304,7 +310,8 @@ async function pickUse(sel) {
     const used = await api("/api/library/" + id + "/use", { method: "POST", body: "{}" });
     applyStatus(await api("/api/status"));
     const mod = used.record && used.record.modality;
-    if (mod === "image" || mod === "video") go("image");
+    if (mod === "image") go("image");
+    if (mod === "video") go("video");
     if (mod === "text") go("chat");
   } catch (e) {
     const msg = e.message || "Use failed.";
@@ -362,19 +369,24 @@ if ($("#seed-random")) {
 function syncStillActions() {
   const has = !!currentStill;
   const lad = ((currentStillJob && currentStillJob.payload) || {}).ladder || "";
-  if ($("#edit")) $("#edit").classList.toggle("hidden", !has);
+  const isClip = !!(currentStillJob && currentStillJob.kind === "video");
+  if ($("#edit")) $("#edit").classList.toggle("hidden", !has || isClip);
   if ($("#enhance")) $("#enhance").classList.toggle("hidden", !has || lad === "max");
 }
 
+function hideMedia(el) {
+  if (!el) return;
+  if (el.dataset.url) URL.revokeObjectURL(el.dataset.url);
+  el.dataset.url = "";
+  el.removeAttribute("src");
+  if (el.pause) { try { el.pause(); } catch (_) {} }
+  el.classList.add("hidden");
+}
+
 function clearCanvas() {
-  const img = $("#still");
+  hideMedia($("#still"));
+  hideMedia($("#clip"));
   const empty = $("#canvas-empty");
-  if (img) {
-    if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
-    img.dataset.url = "";
-    img.removeAttribute("src");
-    img.classList.add("hidden");
-  }
   if (empty) empty.classList.remove("hidden");
   currentStill = null;
   currentStillJob = null;
@@ -391,7 +403,7 @@ async function runMake(extra) {
   try {
     let job = await api("/api/make", { method: "POST", body: JSON.stringify(body) });
     if (err) err.textContent = (job.log && job.log[job.log.length - 1] && job.log[job.log.length - 1].line) || "";
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 1800; i++) {
       if (job.artifact) {
         await showStill(job);
         break;
@@ -410,7 +422,14 @@ async function runMake(extra) {
   }
 }
 
-$("#make").addEventListener("click", () => runMake({}));
+$("#make").addEventListener("click", () => {
+  const extra = {};
+  const sess = lastStatus && lastStatus.session;
+  if (sess && sess.mode === "video" && currentStillJob && (currentStillJob.kind === "image" || currentStillJob.kind === "edit")) {
+    extra.source = currentStill;
+  }
+  runMake(extra);
+});
 
 async function probeTrain() {
   const err = $("#train-err");
@@ -491,7 +510,8 @@ async function deleteStill(id) {
 async function fetchStillUrl(jobId) {
   const headers = {};
   if (token) headers.Authorization = "Bearer " + token;
-  const res = await fetch("/api/jobs/" + jobId + "/still", { headers });
+  let res = await fetch("/api/jobs/" + jobId + "/still", { headers });
+  if (!res.ok) res = await fetch("/api/jobs/" + jobId + "/clip", { headers });
   if (!res.ok) return null;
   const blob = await res.blob();
   if (!blob || blob.size < 32) return null;
@@ -507,7 +527,9 @@ function filmFromJob(job) {
   const lad = p.ladder || sess.ladder || "balanced";
   const loaded = sess.loaded_name || "—";
   const short = loaded.length > 18 ? loaded.slice(0, 16) + "…" : loaded;
-  el.textContent = `${short} · seed ${seed ?? "—"} · ${lad}`;
+  el.textContent = job && job.kind === "video"
+    ? `${short} · clip · seed ${seed ?? "—"} · ${lad}`
+    : `${short} · seed ${seed ?? "—"} · ${lad}`;
 }
 
 function markStrip(id) {
@@ -515,7 +537,7 @@ function markStrip(id) {
 }
 
 function stillJobs(jobs) {
-  return (jobs || []).filter((j) => j && j.id && j.artifact && j.state === "done" && (j.kind === "image" || j.kind === "edit"));
+  return (jobs || []).filter((j) => j && j.id && j.artifact && j.state === "done" && (j.kind === "image" || j.kind === "edit" || j.kind === "video"));
 }
 
 async function showStill(job) {
@@ -523,15 +545,22 @@ async function showStill(job) {
   const url = await fetchStillUrl(job.id);
   if (!url) return;
   const img = $("#still");
+  const vid = $("#clip");
   const empty = $("#canvas-empty");
-  if (!img) {
+  const art = String(job.artifact || "");
+  const playVid = job.kind === "video" && /\.(webm|mp4)$/i.test(art);
+  hideMedia(img);
+  hideMedia(vid);
+  const el = playVid ? vid : img;
+  if (!el) {
     URL.revokeObjectURL(url);
     return;
   }
-  if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
-  img.dataset.url = url;
-  img.src = url;
-  img.classList.remove("hidden");
+  if (el.dataset.url) URL.revokeObjectURL(el.dataset.url);
+  el.dataset.url = url;
+  el.src = url;
+  el.classList.remove("hidden");
+  if (playVid && el.play) { try { el.play(); } catch (_) {} }
   if (empty) empty.classList.add("hidden");
   currentStill = job.id;
   currentStillJob = job;
@@ -720,7 +749,8 @@ function renderLibrary(items) {
         const imageErr = $("#image-err");
         if (imageErr && used.record?.modality !== "text") imageErr.textContent = msg;
         const mod = used.record?.modality;
-        if (mod === "image" || mod === "video") go("image");
+        if (mod === "image") go("image");
+        if (mod === "video") go("video");
         if (mod === "text") go("chat");
       } catch (e) {
         if (err) err.textContent = e.message || "Use failed.";

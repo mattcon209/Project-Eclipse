@@ -10,6 +10,7 @@ from eclipse.config import DATA_DIR, PROJECT_DEFAULT
 import threading
 
 from eclipse.image_runtime import IMAGE, ImageError
+from eclipse.video_runtime import VIDEO, VideoError, family_of, refuse_pair
 from eclipse.jobs import append_log, create as create_job, get as job_get, update as job_update
 from eclipse.library import LIB, get_item, guess_vram_mb, register_card
 from eclipse.pass_through import unchanged
@@ -194,10 +195,13 @@ def make_image(
 ) -> dict[str, Any]:
     prompt = unchanged(prompt)
     data = session()
+    rec = get_item(data.get("loaded")) if data.get("loaded") else None
+    if rec and (rec.get("modality") == "video" or rec.get("handler") == "t2v"):
+        return make_video(prompt, enhance=enhance, source=source)
     if data.get("mode") != "image":
         set_mode("image")
         data = session()
-    rec = get_item(data.get("loaded")) if data.get("loaded") else None
+        rec = get_item(data.get("loaded")) if data.get("loaded") else None
     src = job_get(source) if source else None
     src_payload = (src or {}).get("payload") or {}
     source_path = str((src or {}).get("artifact") or "") if (enhance or edit) else ""
@@ -302,6 +306,129 @@ def _run_image(
             progress=100,
         )
     except ImageError as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    except Exception as e:
+        append_log(job_id, str(e), state="blocked", progress=0)
+        job_update(job_id, error=str(e))
+    finally:
+        OS.end_heavy(job_id)
+
+
+def make_video(
+    prompt: str,
+    *,
+    enhance: bool = False,
+    source: str | None = None,
+) -> dict[str, Any]:
+    prompt = unchanged(prompt)
+    data = session()
+    if data.get("mode") != "video":
+        set_mode("video")
+        data = session()
+    rec = get_item(data.get("loaded")) if data.get("loaded") else None
+    src = job_get(source) if source else None
+    src_payload = (src or {}).get("payload") or {}
+    source_path = ""
+    if src and src.get("artifact") and src.get("kind") in {"image", "edit"}:
+        source_path = str(src.get("artifact") or "")
+    if enhance:
+        prompt = unchanged(str(src_payload.get("prompt") or prompt or ""))
+        seed = int(src_payload.get("seed") or data.get("seed") or 441029)
+        nxt = _next_ladder(str(src_payload.get("ladder") or data.get("ladder") or "balanced"))
+        if not nxt:
+            job = create_job("video", (prompt or "untitled")[:80], {"prompt": prompt, "ladder": "max", "seed": seed})
+            append_log(job["id"], "Already Max. Make a new clip.", state="blocked")
+            return get_job_safe(job["id"])
+        ladder = nxt
+        if src and src.get("kind") == "video":
+            prev = src_payload.get("source")
+            prev_job = job_get(prev) if prev else None
+            if prev_job and prev_job.get("artifact"):
+                source_path = str(prev_job.get("artifact") or "")
+                source = prev
+            else:
+                source_path = ""
+                source = None
+        elif not source_path:
+            source = None
+    else:
+        if data.get("seed_random"):
+            seed = secrets.randbelow(2**32)
+            sess = _state.read()
+            sess["seed"] = seed
+            _state.write(sess)
+        else:
+            seed = int(data.get("seed") or 441029)
+        ladder = data.get("ladder") or "balanced"
+    job = create_job(
+        "video",
+        (prompt or "untitled")[:80],
+        {"prompt": prompt, "ladder": ladder, "seed": seed, "source": source if source_path else None},
+    )
+    if rec and rec.get("state") == "ready":
+        register_card(rec)
+    result = OS.run(prompt, ladder=ladder, job_id=job["id"])
+    if result.refused:
+        append_log(job["id"], result.refuse_reason or "Refused.", state="blocked", progress=0)
+        reason = (result.refuse_reason or "").lower()
+        if "model" in reason:
+            append_log(
+                job["id"],
+                "Search this PC for LTXV / Hunyuan / Wan. Nothing was faked.",
+                state="blocked",
+            )
+        return get_job_safe(job["id"])
+    if result.queued:
+        append_log(job["id"], "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return get_job_safe(job["id"])
+    if not rec or rec.get("handler") in {"vae", "clip"} or rec.get("modality") not in {"video", "image"}:
+        append_log(job["id"], "No video model loaded. Pick LTXV / Hunyuan / Wan. Nothing was faked.", state="blocked")
+        return get_job_safe(job["id"])
+    if rec.get("modality") != "video" and rec.get("handler") != "t2v":
+        append_log(job["id"], "Pick a video model for a clip. Image models stay on Image. Nothing was faked.", state="blocked")
+        return get_job_safe(job["id"])
+    if not family_of(rec):
+        append_log(
+            job["id"],
+            "This trainer is LTXV / Hunyuan / Wan. CogVideo / Mochi wait. Nothing was faked.",
+            state="blocked",
+        )
+        return get_job_safe(job["id"])
+    pair = refuse_pair(rec, source_path or None)
+    if pair:
+        append_log(job["id"], pair, state="blocked", progress=0)
+        return get_job_safe(job["id"])
+    append_log(job["id"], "first_byte", state="running", progress=1)
+    args = (job["id"], rec, prompt, ladder, seed, source_path or None)
+    if VIDEO._stub is not None:
+        _run_video(*args)
+    else:
+        threading.Thread(target=_run_video, args=args, daemon=True).start()
+    return get_job_safe(job["id"])
+
+
+def _run_video(
+    job_id: str,
+    rec: dict[str, Any],
+    prompt: str,
+    ladder: str,
+    seed: int,
+    source_path: str | None = None,
+) -> None:
+    if not OS.begin_heavy(job_id):
+        append_log(job_id, "Queued — one heavy GPU job at a time.", state="queued", progress=0)
+        return
+    try:
+        out = VIDEO.generate(rec, prompt, ladder=ladder, seed=seed, job_id=job_id, source_path=source_path)
+        job_update(job_id, artifact=out.get("path"), error=None)
+        append_log(
+            job_id,
+            f"clip {out.get('width')} · {out.get('frames')}f · {out.get('steps')} steps · seed {seed} · {out.get('impl')}",
+            state="done",
+            progress=100,
+        )
+    except VideoError as e:
         append_log(job_id, str(e), state="blocked", progress=0)
         job_update(job_id, error=str(e))
     except Exception as e:

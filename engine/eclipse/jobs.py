@@ -84,20 +84,21 @@ def remove(job_id: str) -> dict[str, Any] | None:
             kept.append(j)
     if not found:
         return None
-    _unlink_still(found.get("artifact"))
+    _unlink_artifact(found.get("artifact"))
     data["jobs"] = kept
     _store.write(data)
     return found
 
 
-def _unlink_still(artifact: Any) -> None:
+def _unlink_artifact(artifact: Any) -> None:
     if not artifact:
         return
     path = Path(str(artifact))
     try:
         resolved = path.resolve()
-        stills = (Path(DATA_DIR) / "stills").resolve()
-        if resolved.is_file() and resolved.parent == stills:
+        root = Path(DATA_DIR).resolve()
+        allowed = {(root / "stills").resolve(), (root / "clips").resolve()}
+        if resolved.is_file() and resolved.parent in allowed:
             resolved.unlink()
     except OSError:
         pass

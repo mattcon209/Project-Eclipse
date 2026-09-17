@@ -29,8 +29,9 @@ from eclipse.library import get_item, list_items, summary as library_summary
 from eclipse.library import LIB
 from eclipse.chats import add_persona, create_thread, delete_thread, get_thread, list_threads, personas, search as chat_search
 from eclipse.image_runtime import IMAGE
-from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, session, set_ladder, set_mode, set_seed, start_train, use_model
+from eclipse.orchestrator import chat_send, chat_stop, iter_chat, make_image, make_video, session, set_ladder, set_mode, set_seed, start_train, use_model
 from eclipse.train_runtime import TRAIN, TrainError, probe_dataset
+from eclipse.video_runtime import VIDEO
 from eclipse.resource_os import OS
 from eclipse.pairing import check_token, is_paired, pair, status as pair_status
 from eclipse.resources import snapshot as res_snapshot
@@ -229,6 +230,7 @@ def cancel(job_id: str, authorization: str | None = Header(default=None)) -> dic
     _auth(authorization)
     IMAGE.stop()
     TRAIN.stop()
+    VIDEO.stop()
     j = job_cancel(job_id)
     if not j:
         raise HTTPException(404, "No such job.")
@@ -244,6 +246,7 @@ def job_delete(job_id: str, authorization: str | None = Header(default=None)) ->
     if existing.get("state") in {"running", "queued", "downloading"}:
         IMAGE.stop()
         TRAIN.stop()
+        VIDEO.stop()
         job_cancel(job_id)
     j = job_remove(job_id)
     if not j:
@@ -296,6 +299,12 @@ def make(body: MakeIn, authorization: str | None = Header(default=None)) -> dict
         edit=body.edit,
         source=body.source,
     )
+
+
+@app.post("/api/video")
+def video_start(body: MakeIn, authorization: str | None = Header(default=None)) -> dict:
+    _auth(authorization)
+    return make_video(body.prompt.strip(), enhance=body.enhance, source=body.source)
 
 
 @app.post("/api/train/probe")

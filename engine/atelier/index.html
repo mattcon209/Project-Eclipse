@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#070708" />
   <title>Atelier</title>
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/atelier.css?v=17" />
+  <link rel="stylesheet" href="/atelier.css?v=18" />
 </head>
 <body>
   <div id="app">
@@ -72,10 +72,11 @@
       <div id="screen-image" class="screen">
         <div class="canvas">
           <div class="empty-frame" id="canvas-empty">
-            <span>No still yet</span>
-            <small>Pick an image model, then Make. Prompt is sent unchanged.</small>
+            <span id="canvas-empty-title">No still yet</span>
+            <small id="canvas-empty-body">Pick an image model, then Make. Prompt is sent unchanged.</small>
           </div>
           <img id="still" class="still hidden" alt="" />
+          <video id="clip" class="still hidden" controls playsinline loop muted></video>
           <div class="filmstock" id="filmstock">— · — · seed — · balanced</div>
         </div>
         <div class="strip hidden" id="strip" aria-label="Stills"></div>
@@ -222,6 +223,6 @@
       </div>
     </div>
   </div>
-  <script src="/app.js?v=17"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>
